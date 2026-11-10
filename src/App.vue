@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useBoids } from './composables/useBoids'
+import { formatNumber, locale, t, toggleLocale } from './i18n'
 
 const {
   canvasRef,
@@ -42,15 +43,15 @@ onMounted(() => {
   if (window.innerWidth < 820) panelOpen.value = false
 })
 
-const controls = [
-  { key: 'separation', label: 'Separación', min: 0, max: 3, step: 0.05 },
-  { key: 'alignment', label: 'Alineación', min: 0, max: 3, step: 0.05 },
-  { key: 'cohesion', label: 'Cohesión', min: 0, max: 3, step: 0.05 },
-  { key: 'seek', label: 'Ataque', min: 0, max: 3, step: 0.05 },
-  { key: 'distribution', label: 'Distribución', min: 0, max: 2, step: 0.05 },
-  { key: 'defense', label: 'Defensa', min: 0, max: 2, step: 0.05 },
-  { key: 'maxSpeed', label: 'Velocidad', min: 3, max: 14, step: 0.1 },
-]
+const controls = computed(() => [
+  { key: 'separation', label: t('control.separation'), min: 0, max: 3, step: 0.05 },
+  { key: 'alignment', label: t('control.alignment'), min: 0, max: 3, step: 0.05 },
+  { key: 'cohesion', label: t('control.cohesion'), min: 0, max: 3, step: 0.05 },
+  { key: 'seek', label: t('control.seek'), min: 0, max: 3, step: 0.05 },
+  { key: 'distribution', label: t('control.distribution'), min: 0, max: 2, step: 0.05 },
+  { key: 'defense', label: t('control.defense'), min: 0, max: 2, step: 0.05 },
+  { key: 'maxSpeed', label: t('control.maxSpeed'), min: 3, max: 14, step: 0.1 },
+])
 
 const SQUAD_COLORS = {
   A: '#63e6ff',
@@ -68,7 +69,9 @@ const fsm = computed(() => ({
 }))
 
 const stanceLabel = computed(() =>
-  command.value.stance === 'repliegue' ? 'Repliegue' : 'Flanqueo',
+  command.value.stance === 'repliegue'
+    ? t('command.stanceRetreat')
+    : t('command.stanceFlank'),
 )
 
 const healthPercent = computed(() =>
@@ -84,21 +87,21 @@ const alivePercent = computed(() =>
 )
 
 const planLabel = computed(() =>
-  plan.value === 'ordenado' ? 'Plan ordenado' : 'Plan dividido',
+  plan.value === 'ordenado' ? t('plan.ordered') : t('plan.divided'),
 )
 
 const outcome = computed(() => {
   if (battleState.value === 'target-down') {
     return {
-      title: 'Objetivo destruido',
-      text: 'El enjambre ha superado la defensa.',
+      title: t('outcome.targetDownTitle'),
+      text: t('outcome.targetDownText'),
       tone: 'win',
     }
   }
   if (battleState.value === 'swarm-down') {
     return {
-      title: 'Enjambre aniquilado',
-      text: 'Los dos cañones han despejado el cielo.',
+      title: t('outcome.swarmDownTitle'),
+      text: t('outcome.swarmDownText'),
       tone: 'lose',
     }
   }
@@ -106,23 +109,33 @@ const outcome = computed(() => {
 })
 
 const hintText = computed(() => {
-  if (!hasTarget.value) {
-    return 'Toca o haz clic para atacar · arrastra para orbitar.'
-  }
-  if (battleState.value === 'target-down') {
-    return 'Objetivo destruido. Reinicia o coloca un nuevo objetivo.'
-  }
-  if (battleState.value === 'swarm-down') {
-    return 'Enjambre aniquilado. Reinicia para lanzar otra ofensiva.'
-  }
+  if (!hasTarget.value) return t('hint.idle')
+  if (battleState.value === 'target-down') return t('hint.targetDown')
+  if (battleState.value === 'swarm-down') return t('hint.swarmDown')
+
   const commander = command.value.commander?.code
-  const status = `${planLabel.value} · ${alive.value}/${total.value} aves · salud ${Math.round(targetHealth.value)}%`
+  const status = t('hint.status', {
+    plan: planLabel.value,
+    alive: alive.value,
+    total: total.value,
+    hp: Math.round(targetHealth.value),
+  })
+
   if (bombActive.value > 0) {
-    const intercept = bombInterceptors.value
-    return `Bomba de expansión en vuelo · ${intercept} ${intercept === 1 ? 'ave intercepta' : 'aves interceptan'} para reducir el daño.`
+    return t('hint.bomb', { n: bombInterceptors.value })
   }
-  if (!panelOpen.value && commander) return `Mando ${commander} · ${status}`
-  return `${status} · los cañones barren el cielo.`
+  if (!panelOpen.value && commander) {
+    return t('hint.command', { code: commander, status })
+  }
+  return t('hint.footer', { status })
+})
+
+/** Último evento de mando, ya traducido al idioma activo. */
+const commandLogText = computed(() => {
+  const entry = command.value.log?.[0]
+  if (!entry) return t('command.logEmpty')
+  if (typeof entry === 'string') return entry
+  return t(entry.key, entry.params ?? {})
 })
 
 const countFill = computed(() => {
@@ -151,29 +164,36 @@ function fillPercent(control) {
     <header class="hero">
       <p class="hero__eyebrow">
         <span class="eyebrow__dot"></span>
-        <span class="eyebrow__long">Simulación · Boids 3D</span>
-        <span class="eyebrow__short">Boids 3D</span>
+        <span class="eyebrow__long">{{ t('app.eyebrowLong') }}</span>
+        <span class="eyebrow__short">{{ t('app.eyebrowShort') }}</span>
       </p>
-      <h1 class="hero__title">Enjambre</h1>
+      <h1 class="hero__title">{{ t('app.title') }}</h1>
       <p class="hero__text">
-        El objetivo se defiende con dos metralletas que barren la pantalla y
-        cinco bombas de expansión. Cuatro escuadrones coordinan el ataque,
-        esquivan los disparos y planifican derribar las bombas.
-        <span>Haz clic para ordenar la ofensiva; arrastra para orbitar.</span>
+        {{ t('app.intro') }}
+        <span>{{ t('app.hint') }}</span>
       </p>
       <ul class="rules" aria-hidden="true">
-        <li><i style="--rule-color: #7ce8ff"></i>Separación</li>
-        <li><i style="--rule-color: #a78bfa"></i>Alineación</li>
-        <li><i style="--rule-color: #f0a6ff"></i>Cohesión</li>
+        <li><i style="--rule-color: #7ce8ff"></i>{{ t('app.rules.separation') }}</li>
+        <li><i style="--rule-color: #a78bfa"></i>{{ t('app.rules.alignment') }}</li>
+        <li><i style="--rule-color: #f0a6ff"></i>{{ t('app.rules.cohesion') }}</li>
       </ul>
     </header>
 
     <div class="status">
-      <span><strong>{{ count }}</strong> aves</span>
+      <span><strong>{{ count }}</strong> {{ t('status.birdsLabel') }}</span>
       <span class="status__divider"></span>
       <span><strong>{{ fps }}</strong> fps</span>
-      <span v-if="hasTarget" class="status__attack">ataque</span>
-      <span v-if="paused" class="status__paused">en pausa</span>
+      <span v-if="hasTarget" class="status__attack">{{ t('status.attack') }}</span>
+      <span v-if="paused" class="status__paused">{{ t('status.paused') }}</span>
+      <button
+        type="button"
+        class="status__lang"
+        :aria-label="t('status.language')"
+        :title="t('status.language')"
+        @click="toggleLocale"
+      >
+        {{ locale === 'en' ? 'EN' : 'ES' }}
+      </button>
     </div>
 
     <div
@@ -182,7 +202,7 @@ function fillPercent(control) {
       :class="{ 'battle--over': Boolean(outcome) }"
     >
       <div class="battle__head">
-        <span class="battle__label">Objetivo</span>
+        <span class="battle__label">{{ t('battle.label') }}</span>
         <span class="battle__plan">{{ planLabel }}</span>
       </div>
       <div class="battle__bar battle__bar--health">
@@ -191,15 +211,15 @@ function fillPercent(control) {
       </div>
       <div class="battle__bar battle__bar--energy">
         <i :style="{ width: `${energyPercent}%` }"></i>
-        <span>{{ Math.round(targetEnergy) }} energía</span>
+        <span>{{ t('battle.energy', { n: Math.round(targetEnergy) }) }}</span>
       </div>
       <div class="battle__foot">
-        <span><b>{{ alive }}</b>/{{ total }} aves</span>
-        <span><b>{{ kills }}</b> {{ kills === 1 ? 'derribo' : 'derribos' }}</span>
-        <span><b>{{ collisions }}</b> {{ collisions === 1 ? 'impacto' : 'impactos' }}</span>
+        <span>{{ t('battle.birds', { alive, total }) }}</span>
+        <span>{{ t('battle.kills', { n: kills }) }}</span>
+        <span>{{ t('battle.collisions', { n: collisions }) }}</span>
       </div>
       <div class="battle__bombs">
-        <span class="battle__bombs-label">Bombas</span>
+        <span class="battle__bombs-label">{{ t('battle.bombs') }}</span>
         <span class="battle__bombs-pips">
           <i
             v-for="n in 5"
@@ -208,10 +228,10 @@ function fillPercent(control) {
           ></i>
         </span>
         <span v-if="bombActive > 0" class="battle__bombs-live">
-          {{ bombActive }} en vuelo · {{ bombInterceptors }} interceptores
+          {{ t('battle.bombsFlying', { n: bombActive, m: bombInterceptors }) }}
         </span>
         <span v-else class="battle__bombs-live battle__bombs-live--muted">
-          {{ bombStock }}/5 restantes
+          {{ t('battle.bombsLeft', { n: bombStock }) }}
         </span>
       </div>
       <p v-if="outcome" class="battle__outcome" :class="`battle__outcome--${outcome.tone}`">
@@ -239,19 +259,19 @@ function fillPercent(control) {
           stroke-linecap="round"
         />
       </svg>
-      Parámetros
+      {{ t('launcher.parameters') }}
     </button>
 
     <aside class="panel" :class="{ 'panel--visible': panelOpen }">
       <div class="panel__head">
         <div>
-          <p class="panel__kicker">Mando y comportamiento</p>
-          <h2 class="panel__title">Estrategia del enjambre</h2>
+          <p class="panel__kicker">{{ t('panel.kicker') }}</p>
+          <h2 class="panel__title">{{ t('panel.title') }}</h2>
         </div>
         <button
           type="button"
           class="panel__close"
-          aria-label="Cerrar ajustes"
+          :aria-label="t('panel.close')"
           @click="panelOpen = false"
         >
           <svg viewBox="0 0 12 12" fill="none" aria-hidden="true">
@@ -268,7 +288,7 @@ function fillPercent(control) {
       <div class="panel__body">
         <section class="command">
           <div class="command__head">
-            <p class="section-kicker">Cadena de mando</p>
+            <p class="section-kicker">{{ t('command.kicker') }}</p>
             <span class="command__stance">{{ stanceLabel }}</span>
           </div>
 
@@ -282,24 +302,24 @@ function fillPercent(control) {
             <li v-for="squad in command.squads" :key="squad.letter">
               <i :style="{ background: SQUAD_COLORS[squad.letter] }"></i>
               <span class="command__letter">{{ squad.letter }}</span>
-              <b>{{ squad.leader?.code ?? 'sin líder' }}</b>
+              <b>{{ squad.leader?.code || t('command.noLeader') }}</b>
               <em v-if="squad.leader?.isCommander">CMD</em>
             </li>
           </ul>
 
           <p class="command__log">
-            {{ command.log[0] ?? 'Enlace establecido' }}
+            {{ commandLogText }}
           </p>
         </section>
 
         <section v-if="hasTarget" class="combat">
           <div class="combat__head">
-            <p class="section-kicker">Combate</p>
+            <p class="section-kicker">{{ t('combat.kicker') }}</p>
             <span class="combat__plan">{{ planLabel }}</span>
           </div>
 
           <div class="combat__meter">
-            <span class="combat__name">Salud del objetivo</span>
+            <span class="combat__name">{{ t('combat.health') }}</span>
             <span class="combat__value">{{ Math.round(targetHealth) }} / 100</span>
           </div>
           <div class="combat__bar">
@@ -310,7 +330,7 @@ function fillPercent(control) {
           </div>
 
           <div class="combat__meter">
-            <span class="combat__name">Energía de cañones</span>
+            <span class="combat__name">{{ t('combat.energy') }}</span>
             <span class="combat__value">{{ Math.round(targetEnergy) }} / 100</span>
           </div>
           <div class="combat__bar">
@@ -321,7 +341,7 @@ function fillPercent(control) {
           </div>
 
           <div class="combat__meter">
-            <span class="combat__name">Atacantes vivos</span>
+            <span class="combat__name">{{ t('combat.alive') }}</span>
             <span class="combat__value">{{ alive }} / {{ total }}</span>
           </div>
           <div class="combat__bar">
@@ -332,7 +352,7 @@ function fillPercent(control) {
           </div>
 
           <div class="combat__meter">
-            <span class="combat__name">Bombas de expansión</span>
+            <span class="combat__name">{{ t('combat.bombs') }}</span>
             <span class="combat__value">{{ bombStock }} / 5</span>
           </div>
           <div class="combat__bar">
@@ -344,29 +364,26 @@ function fillPercent(control) {
 
           <p class="combat__rows">
             <span>
-              <b>{{ bombActive }}</b> en vuelo
+              {{ t('combat.bombsFlying', { n: bombActive }) }}
               <em v-if="bombInterceptors > 0">
-                · {{ bombInterceptors }} interceptores
+                {{ t('combat.bombsInterceptors', { n: bombInterceptors }) }}
               </em>
             </span>
             <span>
-              <b>{{ bombExplosions }}</b> explosiones
-              <em>· {{ bombIntercepts }} derribadas</em>
+              {{ t('combat.bombsExplosions', { n: bombExplosions }) }}
+              <em>{{ t('combat.bombsDowned', { n: bombIntercepts }) }}</em>
             </span>
           </p>
 
           <p class="combat__hint">
-            Cada disparo resta 1 de salud a un atacante; cada colisión resta
-            2 al objetivo. Las bombas destruyen todo lo que queda dentro de
-            su radio y siempre detonan: los atacantes las detectan y las
-            embisten para apartar la explosión del centro del enjambre.
+            {{ t('combat.hint') }}
           </p>
         </section>
 
         <label class="control">
           <span class="control__head">
-            <span class="control__name">Cantidad</span>
-            <span class="control__value">{{ count }} aves</span>
+            <span class="control__name">{{ t('control.count') }}</span>
+            <span class="control__value">{{ t('control.countValue', { n: count }) }}</span>
           </span>
           <input
             v-model.number="count"
@@ -376,7 +393,7 @@ function fillPercent(control) {
             :max="maxBoids"
             step="50"
             :style="{ '--fill': `${countFill}%` }"
-            aria-label="Cantidad de aves"
+            :aria-label="t('control.countAria')"
           />
         </label>
 
@@ -402,37 +419,36 @@ function fillPercent(control) {
         </label>
 
         <section class="fsm">
-          <p class="section-kicker">Máquina de estados</p>
+          <p class="section-kicker">{{ t('fsm.kicker') }}</p>
           <div class="fsm__grid">
             <span class="fsm__item">
               <i style="--state-color: #63e6ff"></i>
-              <span>Distribución</span>
+              <span>{{ t('fsm.distribute') }}</span>
               <b>{{ fsm.distribute }}</b>
             </span>
             <span class="fsm__item">
               <i style="--state-color: #ff9a76"></i>
-              <span>Ataque</span>
+              <span>{{ t('fsm.dive') }}</span>
               <b>{{ fsm.dive }}</b>
             </span>
             <span class="fsm__item">
               <i style="--state-color: #b69cff"></i>
-              <span>Retirada</span>
+              <span>{{ t('fsm.retreat') }}</span>
               <b>{{ fsm.retreat }}</b>
             </span>
             <span class="fsm__item">
               <i style="--state-color: #ff8fb0"></i>
-              <span>Evasión</span>
+              <span>{{ t('fsm.evade') }}</span>
               <b>{{ fsm.evade }}</b>
             </span>
             <span class="fsm__item">
               <i style="--state-color: #ffc861"></i>
-              <span>Intercepción</span>
+              <span>{{ t('fsm.intercept') }}</span>
               <b>{{ fsm.intercept }}</b>
             </span>
           </div>
           <p class="fsm__hint">
-            Juego de congestión: cada ave elige el sector con mejor pago y
-            evita el escudo.
+            {{ t('fsm.hint') }}
           </p>
         </section>
 
@@ -442,40 +458,36 @@ function fillPercent(control) {
             class="btn btn--primary"
             @click="togglePause"
           >
-            {{ paused ? 'Reanudar' : 'Pausar' }}
+            {{ paused ? t('action.resume') : t('action.pause') }}
           </button>
-          <button type="button" class="btn" @click="scatter">Esparcir</button>
-          <button type="button" class="btn" @click="clearTarget">Abortar</button>
-          <button type="button" class="btn" @click="reset">Reiniciar</button>
+          <button type="button" class="btn" @click="scatter">{{ t('action.scatter') }}</button>
+          <button type="button" class="btn" @click="clearTarget">{{ t('action.abort') }}</button>
+          <button type="button" class="btn" @click="reset">{{ t('action.reset') }}</button>
         </div>
 
         <p v-if="hasTarget" class="panel__stats">
           <span>
             <i class="panel__dot panel__dot--impact"></i>
-            {{ impacts.toLocaleString('es-ES') }}
-            {{ impacts === 1 ? 'impacto' : 'impactos' }}
+            {{ t('stats.impacts', { n: formatNumber(impacts) }) }}
           </span>
           <span>
             <i class="panel__dot panel__dot--block"></i>
-            {{ blocks.toLocaleString('es-ES') }}
-            {{ blocks === 1 ? 'bloqueo' : 'bloqueos' }}
+            {{ t('stats.blocks', { n: formatNumber(blocks) }) }}
           </span>
           <span>
             <i class="panel__dot panel__dot--kill"></i>
-            {{ kills.toLocaleString('es-ES') }}
-            {{ kills === 1 ? 'derribo' : 'derribos' }}
+            {{ t('stats.kills', { n: formatNumber(kills) }) }}
           </span>
           <span>
             <i class="panel__dot panel__dot--shot"></i>
-            {{ shots.toLocaleString('es-ES') }}
-            {{ shots === 1 ? 'disparo' : 'disparos' }}
+            {{ t('stats.shots', { n: formatNumber(shots) }) }}
           </span>
         </p>
       </div>
     </aside>
 
     <div v-if="error" class="webgl-error" role="alert">
-      <p class="webgl-error__title">WebGL no disponible</p>
+      <p class="webgl-error__title">{{ t('error.title') }}</p>
       <p>{{ error }}</p>
     </div>
   </div>
@@ -654,6 +666,28 @@ function fillPercent(control) {
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: #ffd08a;
+}
+
+.status__lang {
+  pointer-events: auto;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(140, 180, 255, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  color: #a9c0e0;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.status__lang:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(140, 200, 255, 0.4);
+  color: #ffffff;
 }
 
 .status__attack {

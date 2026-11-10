@@ -10,6 +10,7 @@ import {
   TARGET_MAX_HEALTH,
 } from '../lib/flock3d'
 import { BirdScene } from '../lib/birdScene'
+import { t } from '../i18n'
 
 export function useBoids() {
   const canvasRef = ref(null)
@@ -228,8 +229,7 @@ export function useBoids() {
       }
     } catch (err) {
       console.error(err)
-      error.value =
-        'Tu navegador no ha podido iniciar WebGL. Prueba con otro navegador o activa la aceleración por hardware.'
+      error.value = t('error.webgl')
       return
     }
 

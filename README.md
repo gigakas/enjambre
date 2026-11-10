@@ -62,6 +62,7 @@ El objetivo no es solo visual: tiene salud y energía, dos metralletas antiaére
 - **WebGL con instancing**: todas las aves se dibujan en una sola llamada de render; el aleteo y la orientación se calculan en el vertex shader.
 - **Cámara orbital**: arrastra para rotar y usa la rueda o el pellizco para acercar.
 - **Interfaz reactiva** con panel de parámetros, HUD de combate (salud, energía, aves vivas, derribos e impactos), estados de la FSM y registro de ascensos.
+- **Dos idiomas**: inglés por defecto y español como opción, con un botón `EN`/`ES` en la barra de estado. La preferencia se guarda en el navegador.
 
 ## Inicio rápido
 
@@ -106,12 +107,21 @@ El resultado queda en `dist/`.
 | Arrastrar | Orbita la cámara |
 | Rueda o pellizco | Zoom |
 | Botón **Parámetros** | Abre o cierra el panel |
+| Botón **EN / ES** | Cambia el idioma de la interfaz (inglés por defecto) |
 | **Pausar** | Congela el movimiento de las aves |
 | **Esparcir** | Dispersa el enjambre y reinicia la distribución |
 | **Abortar** | Elimina el objetivo actual |
 | **Reiniciar** | Reinicia aves, estados y jerarquía |
 
 Al hacer clic se lanza un rayo desde la cámara contra un plano que pasa por el origen y mira hacia la cámara. El objetivo se coloca exactamente bajo el cursor, en cualquier punto de la página: el área útil se adapta al tamaño de la ventana y al encuadre de la cámara. Cuando hay objetivo, el enjambre amplía su volumen operativo para poder perseguirlo hasta los bordes; sin objetivo vuelve al volumen central.
+
+### Idiomas
+
+La interfaz está disponible en **inglés** (idioma por defecto) y **español**. El botón `EN`/`ES` de la barra de estado alterna entre ambos y recuerda la elección en `localStorage`.
+
+Los textos no están escritos en la plantilla: viven en `src/i18n.js`, con un diccionario por idioma. La función `t('clave', { parámetros })` resuelve la clave, sustituye los marcadores `{param}` y elige la variante de plural (`one` / `other`) según el valor de `n`.
+
+Los mensajes que genera la simulación (el registro de mando) viajan como **clave + parámetros**, no como texto: `flock3d.js` guarda `{ key, params }` y la interfaz lo traduce al pintarlo. Así el simulation sigue sin depender del idioma.
 
 ### El panel
 
@@ -462,6 +472,7 @@ src/
 ├── App.vue                  Interfaz, panel, cadena de mando y HUD
 ├── main.js                  Punto de entrada de Vue
 ├── style.css                Estilos base
+├── i18n.js                  Diccionarios de idioma y traductor
 ├── composables/
 │   └── useBoids.js          RAF, resize, eventos de puntero y puente Vue
 └── lib/

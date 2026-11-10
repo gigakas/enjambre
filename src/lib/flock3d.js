@@ -572,8 +572,12 @@ export class Flock3D {
     return false
   }
 
-  _log(message) {
-    this.commandLog.unshift(message)
+  /**
+   * Registra un evento de mando. El texto se guarda como clave para que la
+   * interfaz lo traduzca según el idioma activo.
+   */
+  _log(key, params = null) {
+    this.commandLog.unshift(params ? { key, params } : { key })
     if (this.commandLog.length > 4) this.commandLog.length = 4
   }
 
@@ -622,8 +626,8 @@ export class Flock3D {
     this._selectCommander()
     this.commandVersion += 1
     this.commandLog = []
-    const code = this.commander >= 0 ? this.getCode(this.commander) : 'sin líder'
-    this._log(`Mando inicial · ${code}`)
+    const code = this.commander >= 0 ? this.getCode(this.commander) : ''
+    this._log('log.commandInit', { code })
   }
 
   _ensureCommand() {
@@ -685,19 +689,21 @@ export class Flock3D {
       const nextLeader = this._nextSquadLeader(wasSquad, index)
       this.leaderOfSquad[wasSquad] = nextLeader
       const oldCode = this.getCode(index)
-      const nextCode =
-        nextLeader >= 0 ? this.getCode(nextLeader) : 'sin relevo'
+      const nextCode = nextLeader >= 0 ? this.getCode(nextLeader) : ''
       this._log(
-        `${oldCode} derribada · ${nextCode} asume el escuadrón ${SQUAD_LETTERS[wasSquad]}`,
+        nextCode
+          ? 'log.leaderDown'
+          : 'log.leaderDownNoSuccessor',
+        { code: oldCode, next: nextCode, squad: SQUAD_LETTERS[wasSquad] },
       )
     }
 
     this._selectCommander()
     if (wasCommander && this.commander !== index) {
       if (this.commander >= 0) {
-        this._log(`${this.getCode(this.commander)} toma el mando del enjambre`)
+        this._log('log.commander', { code: this.getCode(this.commander) })
       } else {
-        this._log('Sin relevo disponible · mando en espera')
+        this._log('log.noSuccessor')
       }
     }
 
@@ -746,7 +752,7 @@ export class Flock3D {
     if (this.targetHealth <= 0) {
       this.targetHealth = 0
       this.battleState = 'target-down'
-      this._log('Objetivo destruido · el enjambre rompe filas')
+      this._log('log.targetDown')
       this._resetCannons()
       this._clearBombs()
       for (let i = 0; i < this.count; i += 1) {
@@ -758,7 +764,7 @@ export class Flock3D {
     }
     if (this.aliveCount <= 0) {
       this.battleState = 'swarm-down'
-      this._log('Enjambre aniquilado · el objetivo resiste')
+      this._log('log.swarmDown')
       this._resetCannons()
       this._clearBombs()
     }
@@ -1231,7 +1237,7 @@ export class Flock3D {
       z: target.z,
       id: this.bombId,
     })
-    this._log('Objetivo lanza una bomba de expansión')
+    this._log('log.bombLaunched')
     return true
   }
 
@@ -1281,11 +1287,11 @@ export class Flock3D {
       radius: BOMB_RADIUS,
       hits: hit,
     })
-    this._log(
-      hit > 0
-        ? `Bomba detona · ${hit} atacantes destruidos`
-        : 'Bomba detona sin bajas',
-    )
+    if (hit > 0) {
+      this._log('log.bombDetonate', { n: hit })
+    } else {
+      this._log('log.bombDetonateEmpty')
+    }
   }
 
   /**
@@ -1372,9 +1378,7 @@ export class Flock3D {
       bomb.interceptors = assignedCount
       if (assignedCount > 0 && !bomb.detected) {
         bomb.detected = true
-        this._log(
-          `Bomba detectada · ${assignedCount} aves la interceptan`,
-        )
+        this._log('log.bombDetected', { n: assignedCount })
       }
     }
 
@@ -1449,7 +1453,7 @@ export class Flock3D {
         } else {
           // El objetivo está dentro del radio de alcance: la bomba no puede
           // detonar aquí y sigue su vuelo hasta salir de ese radio.
-          this._log('Bomba resistida · el objetivo está demasiado cerca')
+          this._log('log.bombResisted')
         }
 
         // El ave que embiste la bomba sale despedida.
@@ -1623,9 +1627,7 @@ export class Flock3D {
         this.attackPlan = nextPlan
         this.waveTimer = 0
         this._log(
-          nextPlan === 'ordenado'
-            ? 'Plan ordenado · asalto por oleadas'
-            : 'Plan dividido · ataque por flancos',
+          nextPlan === 'ordenado' ? 'log.planOrdered' : 'log.planDivided',
         )
       }
     }
