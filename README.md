@@ -1,6 +1,6 @@
 # Enjambre
 
-**Simulación 3D de un enjambre de aves con Boids, objetivo defensivo, teoría de juegos y cadena de mando.**
+**Simulación 3D de un enjambre de aves con Boids, combate, teoría de juegos y cadena de mando.**
 
 `Vue 3` · `Three.js` · `WebGL2` · `Vite`
 
@@ -8,7 +8,7 @@
 
 `Enjambre` simula un grupo de aves que ataca un objetivo que se defiende. Las aves vuelan con el algoritmo de Boids, se reparten el ataque mediante un juego de congestión, ejecutan una máquina de estados finitos y obedecen una jerarquía de escuadrones cuyos líderes se reemplazan automáticamente cuando caen.
 
-El objetivo no es solo visual: el escudo persigue al sector más congestionado, los pulsos defensivos derriban líderes y el enjambre debe redistribuirse para encontrar un ángulo abierto.
+El objetivo no es solo visual: tiene salud y energía, dos metralletas antiaéreas que barren la pantalla, cinco bombas de expansión y un escudo direccional adaptativo. Cada ave tiene 5 puntos de vida, esquiva la línea de tiro, planifica el derribo de las bombas y solo daña al objetivo al colisionar con él. La batalla termina cuando el objetivo cae o cuando el enjambre se queda sin efectivos.
 
 ## Tabla de contenidos
 
@@ -19,10 +19,11 @@ El objetivo no es solo visual: el escudo persigue al sector más congestionado, 
   - [Boids en 3D](#1-boids-en-3d)
   - [Rejilla espacial](#2-rejilla-espacial)
   - [Defensa del objetivo](#3-defensa-del-objetivo)
-  - [Teoría de juegos](#4-teoría-de-juegos)
-  - [Máquina de estados finitos](#5-máquina-de-estados-finitos)
-  - [Cadena de mando y relevos](#6-cadena-de-mando-y-relevos)
-  - [Renderizado WebGL](#7-renderizado-webgl)
+  - [Combate](#4-combate)
+  - [Teoría de juegos](#5-teoría-de-juegos)
+  - [Máquina de estados finitos](#6-máquina-de-estados-finitos)
+  - [Cadena de mando y relevos](#7-cadena-de-mando-y-relevos)
+  - [Renderizado WebGL](#8-renderizado-webgl)
 - [Arquitectura](#arquitectura)
 - [Flujo de un frame](#flujo-de-un-frame)
 - [Parámetros](#parámetros)
@@ -40,6 +41,16 @@ El objetivo no es solo visual: el escudo persigue al sector más congestionado, 
   - Escudo direccional adaptativo que persigue al sector con más aves.
   - Pulsos radiales periódicos que repelen y derriban líderes.
   - Repliegue preventivo cuando el pulso está cargando.
+  - Salud (100) y energía (100): los disparos consumen energía y la energía se regenera.
+- **Combate**:
+  - Dos **metralletas antiaéreas** orientables en cualquier ángulo, con alcance de lado a lado de la pantalla y fuego continuo.
+  - Cada disparo resta 1 de salud a un atacante; cada atacante tiene 5 de salud.
+  - Cada colisión de un atacante contra el objetivo resta 2 de salud al objetivo.
+  - Los atacantes detectan el bloqueo de la mira y esquivan lateralmente.
+  - **Bombas de expansión**: 5 por ronda, lentas y con daño en área; el enjambre las detecta y planifica embestirlas.
+  - **Aprendizaje defensivo**: cada ave recuerda el daño recibido y esquiva más, se separa más y evita la línea de fuego.
+  - Planes de ataque **ordenado** (oleadas de dos escuadrones) y **dividido** (todos los flancos a la vez).
+  - Estados de batalla: en curso, objetivo destruido y enjambre aniquilado.
 - **Teoría de juegos**: 18 sectores alrededor del objetivo; cada ave elige su mejor respuesta en un juego de congestión que castiga la aglomeración y el riesgo del escudo.
 - **FSM por ave**: distribución, espera, ataque, retirada y evasión.
 - **Cadena de mando**:
@@ -50,7 +61,7 @@ El objetivo no es solo visual: el escudo persigue al sector más congestionado, 
 - **Visualización de mando**: etiquetas 3D con códigos, halos de líder y líneas de comunicación.
 - **WebGL con instancing**: todas las aves se dibujan en una sola llamada de render; el aleteo y la orientación se calculan en el vertex shader.
 - **Cámara orbital**: arrastra para rotar y usa la rueda o el pellizco para acercar.
-- **Interfaz reactiva** con panel de parámetros, contadores de impactos/bloqueos, estados de la FSM y registro de ascensos.
+- **Interfaz reactiva** con panel de parámetros, HUD de combate (salud, energía, aves vivas, derribos e impactos), estados de la FSM y registro de ascensos.
 
 ## Inicio rápido
 
@@ -100,14 +111,17 @@ El resultado queda en `dist/`.
 | **Abortar** | Elimina el objetivo actual |
 | **Reiniciar** | Reinicia aves, estados y jerarquía |
 
-Al hacer clic se lanza un rayo desde la cámara contra un plano que pasa por el origen y mira hacia la cámara. El punto de impacto se limita al volumen de simulación y se convierte en el objetivo.
+Al hacer clic se lanza un rayo desde la cámara contra un plano que pasa por el origen y mira hacia la cámara. El objetivo se coloca exactamente bajo el cursor, en cualquier punto de la página: el área útil se adapta al tamaño de la ventana y al encuadre de la cámara. Cuando hay objetivo, el enjambre amplía su volumen operativo para poder perseguirlo hasta los bordes; sin objetivo vuelve al volumen central.
 
 ### El panel
 
-- **Cadena de mando**: comandante, líderes de escuadrón, códigos, estrategia actual (flanqueo o repliegue) y último ascenso.
-- **Máquina de estados**: número de aves en distribución, ataque, retirada y evasión.
+- **Cadena de mando**: comandante, líderes de escuadrón, códigos, estrategia actual (flanqueo o repliegue), plan de ataque y último ascenso.
+- **Combate**: salud y energía del objetivo, atacantes vivos, plan vigente, bombas restantes y recordatorio de daño.
+- **Máquina de estados**: número de aves en distribución, ataque, retirada, evasión e intercepción de bombas.
 - **Parámetros**: cantidad y comportamiento.
-- **Impactos y bloqueos**: efectividad del ataque y del escudo.
+- **Impactos, bloqueos, derribos y disparos**: efectividad del ataque, del escudo y de los cañones.
+
+Sobre la escena, el HUD superior muestra la salud y la energía del objetivo, las aves vivas, los acumulados de derribos e impactos y el estado del arsenal de bombas (cuántas quedan, cuántas vuelan y cuántas aves las interceptan). Cuando la batalla termina, el HUD anuncia el resultado.
 
 ### Parámetros
 
@@ -204,7 +218,98 @@ En los últimos ~2.2 s antes del pulso, el objetivo brilla más y la estrategia 
 
 ![Pulso defensivo](docs/enjambre-defensa.webp)
 
-### 4. Teoría de juegos
+### 4. Combate
+
+El combate tiene dos lados con recursos finitos.
+
+**Objetivo**
+
+| Recurso | Valor | Regla |
+| --- | ---: | --- |
+| Salud | 100 | Cada colisión de un atacante resta 2 |
+| Energía | 100 | Cada disparo cuesta 1.2; se regenera a 6.5 por segundo |
+| Cañones | 2 | Metralletas antiaéreas con alcance de 300 unidades (de lado a lado de la pantalla) |
+| Bombas | 5 | Bombas de expansión por ronda, de área y lentas |
+
+#### Metralletas antiaéreas
+
+Los dos cañones no disparan por ráfagas aisladas: funcionan como **metralletas** con alcance de todo el volumen visible. Cada cañón sigue este ciclo:
+
+1. Si tiene energía suficiente (12), elige un atacante dentro de 300 unidades.
+2. Fija un punto de mira y avisa a los atacantes cercanos: el blanco sabe que le están disparando.
+3. En 0.18 s completa el bloqueo y abre fuego continuo, una bala cada 0.16 s (unas 6 balas por segundo y cañón).
+4. La puntería sigue al blanco mientras dure la ráfaga, pero gira más despacio que el ave (factor de aproximación 6): quien se mueve rápido se sale del haz.
+5. Cada disparo cuesta 1.2 de energía. Cuando el objetivo se queda sin energía la metralleta se apaga y tarda unos segundos en recargar.
+
+El radio del haz es pequeño (0.8 u), así que la esquiva funciona: en las pruebas el índice de aciertos se queda alrededor del 40–50 %.
+
+El disparo prioriza al atacante bloqueado y concentra el fuego sobre los ya dañados. Los dos cañones evitan apuntar al mismo blanco salvo que no haya alternativa.
+
+#### Bombas de expansión
+
+El objetivo dispone de **5 bombas por ronda**. Cada bomba:
+
+- Cuesta 18 de energía y se lanza como mucho cada 7 s.
+- Apunta al centro del racimo de atacantes más concentrados, con una distancia mínima de 18 unidades respecto al objetivo: siempre hay tiempo de vuelo.
+- Avanza **lenta** (7 u/s, menos que la velocidad máxima de las aves) y durante sus primeros 1.1 s está desarmada, así que no se puede derribar.
+- Al detonar **destruye todo lo que quede dentro de un radio de 7 unidades**: no hace daño parcial, elimina a cada ave alcanzada.
+
+La explosión **siempre se produce**: interceptar la bomba no la desactiva. Embestirla solo adelanta la detonación y la desplaza, de modo que el radio de daño alcanza a menos aves.
+
+El objetivo nunca se-damifica con su propia arma: la bomba **no puede detonar mientras el objetivo esté dentro de su radio de alcance**. Si un ave embiste la bomba demasiado cerca del objetivo, el embiste no la detiene y la bomba sigue volando hasta salir de ese radio antes de detonar.
+
+#### Defensa del enjambre
+
+El enjambre detecta las bombas (radio de 32 u) y **planifica su derribo**:
+
+- Hasta 3 aves por bomba pasan al estado `INTERCEPT` y vuelan hasta su trayectoria.
+- Apuntan a la posición futura de la bomba (es lenta y predecible) y chocan contra ella.
+- Eligen como interceptores las aves que **no** están dentro del radio de explosión: así la detonación alcanza a menos compañeros.
+- La ave que embiste la bomba paga con su salud: está dentro del radio cuando explota.
+
+Además, cada ave lleva una **memoria de daño** (`caution`, de 0 a 3) que sube cuando recibe fuego o cuando proximity una explosión:
+
+| Consecuencia | Efecto |
+| --- | --- |
+| Esquiva | Más urgente y con más impulso lateral |
+| Separación | Se abre más: no se amontonan en la línea de fuego |
+| Cohesión | Baja: la formación se dispersa tras un impacto |
+| Elección de sector | Evita los sectores alineados con el haz de los cañones |
+
+Esa memoria es el aprendizaje defensivo del enjambre: después de una explosión las aves se abren y las siguientes bombas alcanzan a menos aves.
+
+#### Resto del combate
+
+**Atacantes**
+
+- Cada ave empieza con 5 puntos de salud. Cada impacto de cañón resta 1.
+- Al llegar a 0 el ave muere de forma permanente: se oculta, deja de contar para la FSM y no se recupera.
+- La única forma de dañar al objetivo es la **colisión**: al entrar en `strikeRadius` sin que el escudo bloquee, resta 2 de salud y el ave inicia una retirada larga.
+- Cada colisión tiene un enfriamiento por ave (1.8 s) para que un mismo atacante no vacíe la salud del objetivo en un instante.
+
+**Esquiva**
+
+Cuando un cañón bloquea a un atacante, este recibe un temporizador de amenaza y un vector de impulso perpendicular a la línea de tiro, con signo aleatorio. Las aves cercanas al punto de mira (radio de alerta de 7 u) también esquivan. La metralleta mantiene la alerta viva mientras dure la ráfaga y el ave cambia de lado cada 0.28 s, de modo que sale del haz si se mueve con rapidez.
+
+**Planes de ataque**
+
+| Plan | Cuándo se usa | Comportamiento |
+| --- | --- | --- |
+| **Ordenado** | La metralleta está disparando y el enjambre está casi intacto | Solo dos escuadrones se lanzan por oleada; los otros dos cubren flancos. La oleada rota cada 2.6–3.4 s |
+| **Dividido** | La metralleta recarga o el enjambre ha perdido más del 45 % | Todos los escuadrones atacan por flancos distintos a la vez |
+
+El plan se evalúa en cada reunión de líderes y queda reflejado en el HUD y en el registro de mando.
+
+**Estados de batalla**
+
+```text
+idle ──► active ──► target-down   (salud del objetivo = 0)
+             └────► swarm-down    (aves vivas = 0)
+```
+
+En `target-down` el enjambre rompe filas, los cañones se apagan y el objetivo estalla. En `swarm-down` el objetivo resiste y los cañones dejan de disparar. Ambos estados se anuncian en el HUD y en la pista inferior; **Reiniciar** o colocar un nuevo objetivo devuelve la simulación a `active`.
+
+### 5. Teoría de juegos
 
 El reparto se modela como un **juego de congestión** con 18 sectores repartidos por la esfera mediante una espiral de Fibonacci. Cada ave es un jugador que elige un sector; el pago depende de cuántas aves eligen el mismo sector y del riesgo defensivo.
 
@@ -239,15 +344,17 @@ score(s) = -4.5 · riesgoEscudo(s)²
 
 El resultado no es un equilibrio perfecto, pero sí una aproximación estable a un reparto tipo Nash: las aves evitan el escudo y se separan cuando un sector se satura.
 
-### 5. Máquina de estados finitos
+### 6. Máquina de estados finitos
 
 Cada ave tiene un estado y un temporizador:
 
 ```text
 DISTRIBUCIÓN ──► ESPERA ──► ATAQUE ──► RETIRADA
-      ▲             │           │
-      │             └───────────┴──► EVASIÓN
-      └────────────────────────────────┘
+      ▲             │           │           │
+      │             │           └───────────┴──► EVASIÓN
+      │             │                          │
+      │             └──► INTERCEPTAR BOMBA ───┘
+      └────────────────────────────────────────┘
 ```
 
 | Estado | Comportamiento | Salida |
@@ -257,17 +364,21 @@ DISTRIBUCIÓN ──► ESPERA ──► ATAQUE ──► RETIRADA
 | `ATAQUE` | Se lanza en línea recta al objetivo | Impacto, bloqueo o repliegue |
 | `RETIRADA` | Sale en curva tras impactar | Temporizador → `DISTRIBUCIÓN` |
 | `EVASIÓN` | Se aleja tras un pulso o bloqueo | Temporizador → `DISTRIBUCIÓN` |
+| `INTERCEPTAR BOMBA` | Vuela hasta la bomba para embestirla | Bomba destruida o inexistente → `DISTRIBUCIÓN` |
 
 Detalles del ataque:
 
-- Si la distancia al objetivo es menor que `strikeRadius = 2.6`, se registra un impacto y pasa a `RETIRADA`.
-- Si entra en el cono del escudo, pasa a `EVASIÓN` y el escudo suma un bloqueo.
+- Si la distancia al objetivo es menor que `strikeRadius = 2.6`, se registra una **colisión**: el objetivo pierde 2 de salud y el ave pasa a `RETIRADA` con un enfriamiento de 1.8 s.
+- Si entra en el cono del escudo, pasa a `EVASIÓN` y el escudo suma un bloqueo, sin daño.
 - Si el pulso está cargando y está dentro del radio de peligro, se retira antes de la onda.
-- Los líderes derribados permanecen en `EVASIÓN` durante su tiempo de recuperación.
+- Si un cañón bloquea su posición, esquiva lateralmente mientras dure la amenaza.
+- Si el mando asigna una bomba a interceptar, vuela hasta su trayectoria y la embiste.
+- Las aves con salud 0 quedan fuera de la simulación: no cuentan para la FSM ni para los sectores.
+- Los líderes derribados por un pulso permanecen en `EVASIÓN` durante su tiempo de recuperación; los derribados por un cañón mueren de forma permanente.
 
 Los contadores de estado se actualizan dos veces por segundo y se muestran en el panel.
 
-### 6. Cadena de mando y relevos
+### 7. Cadena de mando y relevos
 
 Cada ave recibe un código estable a partir de su índice:
 
@@ -312,13 +423,13 @@ Un líder derribado vuelve como miembro al recuperarse. No recupera el mando aut
 
 La primera versión de esta lógica derribaba a los reemplazos promovidos durante el mismo pulso, lo que producía cascadas de decenas de ascensos. Ahora el pulso toma una **instantánea de los líderes al inicio** y solo puede derribar a esos líderes, no a sus reemplazos.
 
-### 7. Renderizado WebGL
+### 8. Renderizado WebGL
 
 Las aves se dibujan con `InstancedBufferGeometry` y un `ShaderMaterial` propio:
 
 - Un único *draw call* para todas las aves.
 - 12 vértices por ave: dos alas, cuerpo y cola.
-- Atributos instanciados: posición, velocidad, color y fase.
+- Atributos instanciados: posición, velocidad, color, fase y salud.
 - El vertex shader construye una base ortonormal a partir de la velocidad (`forward`, `right`, `up`) y orienta el ave.
 - El aleteo se calcula con `sin(tiempo + fase)` y desplaza las puntas de las alas.
 - El color se asigna por escuadrón (cian, azul, violeta y magenta).
@@ -327,12 +438,20 @@ Las aves se dibujan con `InstancedBufferGeometry` y un `ShaderMaterial` propio:
 
 La escena incluye además:
 
-- Retícula naranja del objetivo.
+- Retícula naranja del objetivo, que se tiñe de rojo según su salud.
+- Dos cañones con base, cañón, punta luminosa y un resplandor en la boca que se mantiene encendido mientras disparan.
+- Las balas se dibujan como proyectiles luminosos en vuelo (no como líneas) y cada disparo deja un fogonazo en la boca del cañón.
+- Bombas de expansión con núcleo pulsante, halo, anillo del área de explosión y trayectoria prevista.
+- Ondas de explosión de las bombas (anillo expansivo) y chispas de interceptación.
+- Líneas de mira y anillos de bloqueo sobre el punto de mira anticipado.
+- Haces instantáneos (trazadoras) al disparar y chispas de impacto.
 - Cúpula de escudo y anillo de borde.
 - Ondas de pulso (esfera y anillo).
-- Chispas de impactos y de líderes derribados.
+- Chispas de colisiones, de impactos y de aves derribadas.
 - Polvo ambiental.
 - Etiquetas de códigos, halos de líder y enlaces de mando.
+
+El shader de las aves recibe un atributo `aHealth`: las aves dañadas pierden brillo y las que llegan a 0 se descartan en el fragment shader (`discard`). Así el coste de dibujar un ave muerta es nulo sin tocar la geometría instanciada.
 
 En pantallas estrechas la cámara se encuadra automáticamente; si la relación de aspecto es menor que 0.8 se ocultan las etiquetas de los líderes y se conservan los halos y enlaces.
 
@@ -346,9 +465,9 @@ src/
 ├── composables/
 │   └── useBoids.js          RAF, resize, eventos de puntero y puente Vue
 └── lib/
-    ├── flock3d.js           Boids, rejilla, FSM, juego, defensa y jerarquía
-    └── birdScene.js         Three.js: instancing, shader, escudo, pulsos,
-                             etiquetas, enlaces y cámara
+    ├── flock3d.js           Boids, rejilla, FSM, juego, defensa, combate y jerarquía
+    └── birdScene.js         Three.js: instancing, shader, escudo, pulsos, cañones,
+                             haces, etiquetas, enlaces y cámara
 ```
 
 Separación de responsabilidades:
@@ -370,18 +489,19 @@ App.vue ──parámetros/cantidad──► useBoids ──► Flock3D
 
 1. `requestAnimationFrame` calcula `dt` (limitado a 50 ms).
 2. Si no está en pausa, `Flock3D.update(dt)`:
-   - reconstruye la rejilla espacial,
+   - reconstruye la rejilla espacial (ignorando aves muertas),
    - actualiza la defensa y los pulsos,
-   - recupera líderes derribados,
-   - recorre las aves: vecinas, fuerzas, FSM, planificación y integración,
-   - actualiza escudo, estrategia y estado de la jerarquía.
+   - actualiza los cañones, las bombas, los temporizadores de esquiva y el plan de ataque,
+   - recupera líderes derribados por pulsos,
+   - recorre las aves: vecinas, fuerzas, esquiva, FSM, planificación, colisiones e integración,
+   - actualiza escudo, estrategia, estado de batalla y jerarquía.
 3. `BirdScene.update(dt, tiempo)`:
    - actualiza el tamaño y la intensidad adaptativos,
-   - sube posiciones y velocidades a la GPU,
-   - actualiza marcador, escudo, pulsos, chispas, etiquetas y enlaces,
+   - sube posiciones, velocidades y salud a la GPU,
+   - dibuja cañones, bombas, miras, haces, chispas, marcador, escudo, pulsos, etiquetas y enlaces,
    - actualiza los controles de cámara.
 4. `render()` dibuja la escena.
-5. Cada 0.5 s se publican FPS, impactos, bloqueos, estados FSM y cadena de mando a la interfaz.
+5. Cada 0.5 s se publican FPS, impactos, bloqueos, derribos, disparos, bombas, estados FSM, combate y cadena de mando a la interfaz.
 
 ## Parámetros
 
@@ -410,11 +530,37 @@ Están en `src/lib/flock3d.js`:
 | `edgeMargin` | 10 | Margen de los bordes |
 | `strikeRadius` | 2.6 | Radio de impacto |
 | `STAGE_RADIUS` | 20 | Radio de la formación de espera |
+| `PLAY_BOUNDS` | 190 × 120 × 190 | Volumen operativo para perseguir objetivos en toda la página |
 | `SECTOR_COUNT` | 18 | Sectores del juego |
 | `SQUAD_COUNT` | 4 | Escuadrones |
 | `SHIELD_RADIUS` | 9.5 | Radio del escudo |
 | `SHIELD_ANGLE` | 0.95 rad | Semiangulo del cono del escudo |
 | `PULSE_RADIUS` | 15 | Radio del pulso defensivo |
+| `TARGET_MAX_HEALTH` | 100 | Salud del objetivo |
+| `TARGET_MAX_ENERGY` | 100 | Energía del objetivo |
+| `ATTACKER_MAX_HEALTH` | 5 | Salud de cada atacante |
+| `SHOT_DAMAGE` | 1 | Daño de cada disparo |
+| `COLLISION_DAMAGE` | 2 | Daño de cada colisión |
+| `CANNON_COUNT` | 2 | Metralletas del objetivo |
+| `CANNON_RANGE` | 300 | Alcance: de lado a lado de la pantalla |
+| `CANNON_AIM_TIME` | 0.18 s | Tiempo de bloqueo antes de abrir fuego |
+| `CANNON_FIRE_INTERVAL` | 0.16 s | Cadencia de la metralleta |
+| `CANNON_ENERGY_COST` | 1.2 | Energía por disparo |
+| `CANNON_BURST_ENERGY` | 12 | Energía mínima para abrir una ráfaga |
+| `ENERGY_REGEN` | 6.5/s | Regeneración de energía |
+| `SHOT_RADIUS` | 0.8 | Radio del haz |
+| `COLLISION_COOLDOWN` | 1.8 s | Enfriamiento de colisión por ave |
+| `DODGE_ALERT_RADIUS` | 7 | Radio de alerta de esquiva |
+| `BOMB_COUNT` | 5 | Bombas de expansión por ronda |
+| `BOMB_SPEED` | 7 u/s | Velocidad de la bomba (lenta) |
+| `BOMB_RADIUS` | 7 | Radio de la explosión (letal dentro) |
+| `BOMB_FUSE` | 8 s | Vida máxima de la bomba |
+| `BOMB_ENERGY_COST` | 18 | Energía por bomba |
+| `BOMB_COOLDOWN` | 7 s | Tiempo mínimo entre bombas |
+| `BOMB_ARM_TIME` | 1.1 s | Tiempo de armado: no se puede derribar |
+| `BOMB_MIN_RANGE` | 18 u | Distancia mínima del punto de detonación |
+| `BOMB_DETECT_RADIUS` | 32 | Radio de detección de las aves |
+| `BOMB_MAX_INTERCEPTORS` | 3 | Aves que planifican el derribo por bomba |
 | `LEADER_DOWN_TIME` | ~6 s | Recuperación de un líder |
 | `STRATEGY_INTERVAL` | ~2.4 s | Reunión de líderes |
 
@@ -428,6 +574,8 @@ Están en `src/lib/flock3d.js`:
 | Boids (vecinas) | O(n·k), con `k` vecinas reales |
 | FSM | O(n) por paso |
 | Juego de sectores | O(n·18) repartido en decisiones escalonadas |
+| Cañones | O(n) por cañón y disparo (hitscan) |
+| Bombas | O(n) por detonación (área) |
 | Jerarquía de líderes | O(4) cada ~2.4 s |
 | Renderizado | O(n) vértices + coste de relleno |
 
@@ -471,7 +619,10 @@ __boids.simulation.getStateCounts()
 // [distribución, espera, ataque, retirada, evasión]
 
 __boids.simulation.getCommandInfo()
-// comandante, líderes, estrategia y registro
+// comandante, líderes, estrategia, plan y registro
+
+__boids.simulation.getCombatInfo()
+// salud/energía del objetivo, aves vivas, plan, estado y cañones
 
 __boids.simulation.getCode(42)
 // "C-011"
@@ -479,9 +630,23 @@ __boids.simulation.getCode(42)
 __boids.simulation.leaderOfSquad
 __boids.simulation.commander
 __boids.simulation.downTimers
+__boids.simulation.health
+__boids.simulation.targetHealth
+__boids.simulation.targetEnergy
+__boids.simulation.battleState
+__boids.simulation.bombs
+__boids.simulation.caution
 __boids.scene.totalImpacts
 __boids.scene.totalBlocks
+__boids.scene.totalKills
+__boids.scene.totalCollisions
+__boids.scene.totalShots
+__boids.scene.totalBombsLaunched
+__boids.scene.totalBombExplosions
+__boids.scene.totalBombIntercepts
 ```
+
+Los eventos de combate se consumen de la simulación y se dibujan en la escena: `consumeShots()`, `consumeKills()` y `consumeCollisions()` vacían sus colas. Si llamas a `setTarget()` directamente desde DevTools, reinicia también `scene.totalKills`, `scene.totalCollisions` y `scene.totalShots` a mano; los botones y el clic lo hacen por ti.
 
 `setCount()` también está disponible en la simulación, pero si se usa directamente no se sincroniza el deslizador de Vue; para probar desde la interfaz es mejor usar el control de cantidad.
 
@@ -489,20 +654,22 @@ El hook solo existe con `import.meta.env.DEV`; no se publica en la compilación 
 
 ## Limitaciones y próximos pasos
 
-- El objetivo no tiene puntos de vida: el escudo y los pulsos son infinitos.
-- Los líderes derribados se recuperan como miembros; no se eliminan permanentemente.
+- Los cañones son hitscan con bloqueo telegrafiado: no simulan proyectiles ni balística.
+- Las bombas siempre detonan: interceptarlas solo desplaza la explosión, no la cancela.
+- La explosión es letal dentro del radio: no existe el daño parcial.
+- La memoria de daño es un estado por ave (0–3), no un aprendizaje real entre partidas.
+- Las colisiones son esféricas y no hay mallas de colisión; las aves son geometría instanciada.
+- Los líderes derribados por pulsos se recuperan como miembros; los derribados por cañones mueren de forma permanente.
 - La comunicación entre líderes es una simulación local por ticks de estrategia, no una red real.
-- No hay colisiones físicas ni mallas de colisión; las aves son geometría instanciada.
 - Los cuatro escuadrones y los 18 sectores están fijados en el código, aunque son fáciles de cambiar.
 - A 5000 aves el rendimiento cae en hardware integrado.
 
 Posibles extensiones:
 
-- Vida y destrucción del objetivo.
-- Comunicación con latencia y pérdida de paquetes.
-- Diferentes doctrinas de ataque por escuadrón.
 - Más tipos de defensa (torretas, campos de minas, escudos móviles).
-- Exportar métricas de la simulación.
+- Doctrinas de ataque por escuadrón y formaciones explícitas.
+- Comunicación con latencia y pérdida de paquetes.
+- Exportar métricas de la simulación y del combate.
 - Ejecutar la simulación en un worker para liberar el hilo principal.
 
 ## Tecnologías

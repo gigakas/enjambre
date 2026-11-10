@@ -13,6 +13,20 @@ const {
   blocks,
   stateCounts,
   command,
+  targetHealth,
+  targetEnergy,
+  alive,
+  total,
+  plan,
+  battleState,
+  kills,
+  collisions,
+  shots,
+  bombStock,
+  bombActive,
+  bombInterceptors,
+  bombExplosions,
+  bombIntercepts,
   error,
   minBoids,
   maxBoids,
@@ -50,21 +64,65 @@ const fsm = computed(() => ({
   dive: stateCounts.value[2],
   retreat: stateCounts.value[3],
   evade: stateCounts.value[4],
+  intercept: stateCounts.value[5] ?? 0,
 }))
 
 const stanceLabel = computed(() =>
   command.value.stance === 'repliegue' ? 'Repliegue' : 'Flanqueo',
 )
 
+const healthPercent = computed(() =>
+  Math.max(0, Math.min(100, targetHealth.value)),
+)
+
+const energyPercent = computed(() =>
+  Math.max(0, Math.min(100, targetEnergy.value)),
+)
+
+const alivePercent = computed(() =>
+  total.value > 0 ? (alive.value / total.value) * 100 : 0,
+)
+
+const planLabel = computed(() =>
+  plan.value === 'ordenado' ? 'Plan ordenado' : 'Plan dividido',
+)
+
+const outcome = computed(() => {
+  if (battleState.value === 'target-down') {
+    return {
+      title: 'Objetivo destruido',
+      text: 'El enjambre ha superado la defensa.',
+      tone: 'win',
+    }
+  }
+  if (battleState.value === 'swarm-down') {
+    return {
+      title: 'Enjambre aniquilado',
+      text: 'Los dos cañones han despejado el cielo.',
+      tone: 'lose',
+    }
+  }
+  return null
+})
+
 const hintText = computed(() => {
   if (!hasTarget.value) {
     return 'Toca o haz clic para atacar · arrastra para orbitar.'
   }
-  const commander = command.value.commander?.code
-  if (!panelOpen.value && commander) {
-    return `Mando ${commander} · objetivo defendido; el enjambre busca un ángulo abierto.`
+  if (battleState.value === 'target-down') {
+    return 'Objetivo destruido. Reinicia o coloca un nuevo objetivo.'
   }
-  return 'Objetivo defendido. El enjambre se redistribuye y busca un ángulo abierto.'
+  if (battleState.value === 'swarm-down') {
+    return 'Enjambre aniquilado. Reinicia para lanzar otra ofensiva.'
+  }
+  const commander = command.value.commander?.code
+  const status = `${planLabel.value} · ${alive.value}/${total.value} aves · salud ${Math.round(targetHealth.value)}%`
+  if (bombActive.value > 0) {
+    const intercept = bombInterceptors.value
+    return `Bomba de expansión en vuelo · ${intercept} ${intercept === 1 ? 'ave intercepta' : 'aves interceptan'} para reducir el daño.`
+  }
+  if (!panelOpen.value && commander) return `Mando ${commander} · ${status}`
+  return `${status} · los cañones barren el cielo.`
 })
 
 const countFill = computed(() => {
@@ -98,8 +156,9 @@ function fillPercent(control) {
       </p>
       <h1 class="hero__title">Enjambre</h1>
       <p class="hero__text">
-        El objetivo se defiende. Cuatro escuadrones coordinan el ataque y
-        buscan el ángulo débil.
+        El objetivo se defiende con dos metralletas que barren la pantalla y
+        cinco bombas de expansión. Cuatro escuadrones coordinan el ataque,
+        esquivan los disparos y planifican derribar las bombas.
         <span>Haz clic para ordenar la ofensiva; arrastra para orbitar.</span>
       </p>
       <ul class="rules" aria-hidden="true">
@@ -115,6 +174,50 @@ function fillPercent(control) {
       <span><strong>{{ fps }}</strong> fps</span>
       <span v-if="hasTarget" class="status__attack">ataque</span>
       <span v-if="paused" class="status__paused">en pausa</span>
+    </div>
+
+    <div
+      v-if="hasTarget"
+      class="battle"
+      :class="{ 'battle--over': Boolean(outcome) }"
+    >
+      <div class="battle__head">
+        <span class="battle__label">Objetivo</span>
+        <span class="battle__plan">{{ planLabel }}</span>
+      </div>
+      <div class="battle__bar battle__bar--health">
+        <i :style="{ width: `${healthPercent}%` }"></i>
+        <span>{{ Math.round(targetHealth) }} / 100</span>
+      </div>
+      <div class="battle__bar battle__bar--energy">
+        <i :style="{ width: `${energyPercent}%` }"></i>
+        <span>{{ Math.round(targetEnergy) }} energía</span>
+      </div>
+      <div class="battle__foot">
+        <span><b>{{ alive }}</b>/{{ total }} aves</span>
+        <span><b>{{ kills }}</b> {{ kills === 1 ? 'derribo' : 'derribos' }}</span>
+        <span><b>{{ collisions }}</b> {{ collisions === 1 ? 'impacto' : 'impactos' }}</span>
+      </div>
+      <div class="battle__bombs">
+        <span class="battle__bombs-label">Bombas</span>
+        <span class="battle__bombs-pips">
+          <i
+            v-for="n in 5"
+            :key="n"
+            :class="{ 'battle__pip--spent': n > bombStock }"
+          ></i>
+        </span>
+        <span v-if="bombActive > 0" class="battle__bombs-live">
+          {{ bombActive }} en vuelo · {{ bombInterceptors }} interceptores
+        </span>
+        <span v-else class="battle__bombs-live battle__bombs-live--muted">
+          {{ bombStock }}/5 restantes
+        </span>
+      </div>
+      <p v-if="outcome" class="battle__outcome" :class="`battle__outcome--${outcome.tone}`">
+        <b>{{ outcome.title }}</b>
+        <span>{{ outcome.text }}</span>
+      </p>
     </div>
 
     <div class="hint" :class="{ 'hint--target': hasTarget }">
@@ -189,6 +292,77 @@ function fillPercent(control) {
           </p>
         </section>
 
+        <section v-if="hasTarget" class="combat">
+          <div class="combat__head">
+            <p class="section-kicker">Combate</p>
+            <span class="combat__plan">{{ planLabel }}</span>
+          </div>
+
+          <div class="combat__meter">
+            <span class="combat__name">Salud del objetivo</span>
+            <span class="combat__value">{{ Math.round(targetHealth) }} / 100</span>
+          </div>
+          <div class="combat__bar">
+            <i
+              class="combat__bar--health"
+              :style="{ width: `${healthPercent}%` }"
+            ></i>
+          </div>
+
+          <div class="combat__meter">
+            <span class="combat__name">Energía de cañones</span>
+            <span class="combat__value">{{ Math.round(targetEnergy) }} / 100</span>
+          </div>
+          <div class="combat__bar">
+            <i
+              class="combat__bar--energy"
+              :style="{ width: `${energyPercent}%` }"
+            ></i>
+          </div>
+
+          <div class="combat__meter">
+            <span class="combat__name">Atacantes vivos</span>
+            <span class="combat__value">{{ alive }} / {{ total }}</span>
+          </div>
+          <div class="combat__bar">
+            <i
+              class="combat__bar--swarm"
+              :style="{ width: `${alivePercent}%` }"
+            ></i>
+          </div>
+
+          <div class="combat__meter">
+            <span class="combat__name">Bombas de expansión</span>
+            <span class="combat__value">{{ bombStock }} / 5</span>
+          </div>
+          <div class="combat__bar">
+            <i
+              class="combat__bar--bomb"
+              :style="{ width: `${(bombStock / 5) * 100}%` }"
+            ></i>
+          </div>
+
+          <p class="combat__rows">
+            <span>
+              <b>{{ bombActive }}</b> en vuelo
+              <em v-if="bombInterceptors > 0">
+                · {{ bombInterceptors }} interceptores
+              </em>
+            </span>
+            <span>
+              <b>{{ bombExplosions }}</b> explosiones
+              <em>· {{ bombIntercepts }} derribadas</em>
+            </span>
+          </p>
+
+          <p class="combat__hint">
+            Cada disparo resta 1 de salud a un atacante; cada colisión resta
+            2 al objetivo. Las bombas destruyen todo lo que queda dentro de
+            su radio y siempre detonan: los atacantes las detectan y las
+            embisten para apartar la explosión del centro del enjambre.
+          </p>
+        </section>
+
         <label class="control">
           <span class="control__head">
             <span class="control__name">Cantidad</span>
@@ -250,6 +424,11 @@ function fillPercent(control) {
               <span>Evasión</span>
               <b>{{ fsm.evade }}</b>
             </span>
+            <span class="fsm__item">
+              <i style="--state-color: #ffc861"></i>
+              <span>Intercepción</span>
+              <b>{{ fsm.intercept }}</b>
+            </span>
           </div>
           <p class="fsm__hint">
             Juego de congestión: cada ave elige el sector con mejor pago y
@@ -280,6 +459,16 @@ function fillPercent(control) {
             <i class="panel__dot panel__dot--block"></i>
             {{ blocks.toLocaleString('es-ES') }}
             {{ blocks === 1 ? 'bloqueo' : 'bloqueos' }}
+          </span>
+          <span>
+            <i class="panel__dot panel__dot--kill"></i>
+            {{ kills.toLocaleString('es-ES') }}
+            {{ kills === 1 ? 'derribo' : 'derribos' }}
+          </span>
+          <span>
+            <i class="panel__dot panel__dot--shot"></i>
+            {{ shots.toLocaleString('es-ES') }}
+            {{ shots === 1 ? 'disparo' : 'disparos' }}
           </span>
         </p>
       </div>
@@ -472,6 +661,176 @@ function fillPercent(control) {
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: #ffa078;
+}
+
+/* ---------- Combate ---------- */
+
+.battle {
+  position: fixed;
+  top: 40px;
+  left: 50%;
+  z-index: 2;
+  width: 300px;
+  padding: 12px 14px 11px;
+  transform: translateX(-50%);
+  border-radius: 14px;
+  border: 1px solid rgba(255, 150, 110, 0.2);
+  background: rgba(16, 11, 14, 0.58);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  pointer-events: none;
+  transition:
+    border-color 0.4s ease,
+    background 0.4s ease;
+}
+
+.battle--over {
+  border-color: rgba(140, 180, 255, 0.28);
+  background: rgba(9, 14, 24, 0.68);
+}
+
+.battle__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.battle__label {
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #ffb49a;
+}
+
+.battle__plan {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: #9fc4e8;
+}
+
+.battle__bar {
+  position: relative;
+  height: 7px;
+  margin-bottom: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.battle__bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  transition: width 0.35s ease;
+}
+
+.battle__bar--health i {
+  background: linear-gradient(90deg, #ff6b5c, #ffb07a);
+  box-shadow: 0 0 10px rgba(255, 120, 90, 0.55);
+}
+
+.battle__bar--energy i {
+  background: linear-gradient(90deg, #63e6ff, #8fb4ff);
+  box-shadow: 0 0 10px rgba(99, 230, 255, 0.45);
+}
+
+.battle__bar span {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 7px;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.battle__foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 2px;
+  font-size: 9px;
+  color: #b9c8de;
+  font-variant-numeric: tabular-nums;
+}
+
+.battle__foot b {
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.battle__bombs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px solid rgba(255, 150, 110, 0.14);
+}
+
+.battle__bombs-label {
+  font-size: 8.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #ffb49a;
+}
+
+.battle__bombs-pips {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.battle__bombs-pips i {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: #ffb457;
+  box-shadow: 0 0 7px rgba(255, 180, 87, 0.85);
+}
+
+.battle__bombs-pips i.battle__pip--spent {
+  background: rgba(255, 255, 255, 0.16);
+  box-shadow: none;
+}
+
+.battle__bombs-live {
+  font-size: 8.5px;
+  color: #ffd9a8;
+}
+
+.battle__bombs-live--muted {
+  color: #7f93b1;
+}
+
+.battle__outcome {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 9px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid rgba(140, 180, 255, 0.16);
+}
+
+.battle__outcome b {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.battle__outcome span {
+  font-size: 9.5px;
+  color: #a8b9d2;
+}
+
+.battle__outcome--win b {
+  color: #8ef0c0;
+}
+
+.battle__outcome--lose b {
+  color: #ff9a8a;
 }
 
 /* ---------- Pista inferior ---------- */
@@ -748,6 +1107,107 @@ function fillPercent(control) {
   color: #8097b8;
 }
 
+/* ---------- Combate (panel) ---------- */
+
+.combat {
+  margin-top: 16px;
+  padding: 13px 14px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 150, 110, 0.16);
+  background: rgba(255, 120, 90, 0.045);
+}
+
+.combat__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.combat__head .section-kicker {
+  margin: 0;
+}
+
+.combat__plan {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: #ffb49a;
+}
+
+.combat__meter {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 5px;
+  font-size: 9.5px;
+  color: #a7b8d3;
+}
+
+.combat__value {
+  color: #e7f3ff;
+  font-variant-numeric: tabular-nums;
+}
+
+.combat__bar {
+  height: 6px;
+  margin-bottom: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.combat__bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  transition: width 0.35s ease;
+}
+
+.combat__bar--health {
+  background: linear-gradient(90deg, #ff6b5c, #ffb07a);
+}
+
+.combat__bar--energy {
+  background: linear-gradient(90deg, #63e6ff, #8fb4ff);
+}
+
+.combat__bar--swarm {
+  background: linear-gradient(90deg, #8cecff, #b49bff);
+}
+
+.combat__bar--bomb {
+  background: linear-gradient(90deg, #ffb457, #ff6b4a);
+}
+
+.combat__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 2px 0 0;
+  font-size: 9.5px;
+  color: #a7b8d3;
+}
+
+.combat__rows b {
+  font-weight: 600;
+  color: #e7f3ff;
+  font-variant-numeric: tabular-nums;
+}
+
+.combat__rows em {
+  font-style: normal;
+  color: #7f93b1;
+}
+
+.combat__hint {
+  margin: 8px 0 0;
+  font-size: 9.5px;
+  line-height: 1.55;
+  color: #8fa3c2;
+}
+
 /* ---------- FSM ---------- */
 
 .fsm {
@@ -989,6 +1449,16 @@ function fillPercent(control) {
   box-shadow: 0 0 7px rgba(110, 215, 255, 0.9);
 }
 
+.panel__dot--kill {
+  background: #ffffff;
+  box-shadow: 0 0 7px rgba(210, 240, 255, 0.9);
+}
+
+.panel__dot--shot {
+  background: #b49bff;
+  box-shadow: 0 0 7px rgba(180, 155, 255, 0.9);
+}
+
 /* ---------- Lanzador del panel ---------- */
 
 .panel-launcher {
@@ -1089,6 +1559,15 @@ function fillPercent(control) {
     right: 20px;
     padding: 7px 13px;
     font-size: 10.5px;
+  }
+
+  .battle {
+    top: auto;
+    right: 16px;
+    bottom: 128px;
+    left: 16px;
+    width: auto;
+    transform: none;
   }
 
   .hint {

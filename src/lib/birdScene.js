@@ -2,12 +2,20 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import {
   BOUNDS,
+  BOMB_COUNT,
+  BOMB_RADIUS,
+  CANNON_MOUNTS,
   MAX_BOIDS,
+  PLAY_BOUNDS,
   PULSE_RADIUS,
   SHIELD_ANGLE,
   SHIELD_RADIUS,
   SQUAD_COUNT,
+  TARGET_MAX_HEALTH,
 } from './flock3d'
+
+/** Velocidad visual de las balas de la metralleta. */
+const BULLET_SPEED = 420
 
 const SQUAD_HUES = [0.48, 0.6, 0.73, 0.86]
 const SQUAD_COLORS = [0x63e6ff, 0x7f9cff, 0xb18cff, 0xff8fd0]
@@ -40,9 +48,11 @@ const BIRD_VERTEX_SHADER = /* glsl */ `
   attribute vec3 aVelocity;
   attribute vec3 aColor;
   attribute float aPhase;
+  attribute float aHealth;
 
   varying vec3 vColor;
   varying float vDepth;
+  varying float vHealth;
 
   void main() {
     vec3 forward = normalize(aVelocity + vec3(0.0001, 0.0001, 0.0001));
@@ -50,7 +60,9 @@ const BIRD_VERTEX_SHADER = /* glsl */ `
     vec3 right = normalize(cross(upRef, forward));
     vec3 up = cross(forward, right);
 
+    float healthRatio = clamp(aHealth / 5.0, 0.0, 1.0);
     float birdScale = (0.8 + fract(aPhase * 6.618) * 0.42) * uSize;
+    birdScale *= step(0.5, aHealth);
     vec3 p = position * birdScale;
 
     // Aleteo: las puntas de las alas suben y bajan.
@@ -63,8 +75,9 @@ const BIRD_VERTEX_SHADER = /* glsl */ `
     gl_Position = projectionMatrix * mv;
 
     vDepth = -mv.z;
+    vHealth = aHealth;
     float nose = smoothstep(-1.2, 1.15, position.z);
-    vColor = aColor * (0.72 + nose * 0.45);
+    vColor = aColor * (0.72 + nose * 0.45) * mix(0.38, 1.0, healthRatio);
   }
 `
 
@@ -75,8 +88,10 @@ const BIRD_FRAGMENT_SHADER = /* glsl */ `
 
   varying vec3 vColor;
   varying float vDepth;
+  varying float vHealth;
 
   void main() {
+    if (vHealth < 0.5) discard;
     float fog = smoothstep(uFogNear, uFogFar, vDepth);
     // Mezcla aditiva: cuanto más lejos, menos opaco.
     // La intensidad baja con la cantidad para no saturar el grupo.
@@ -134,16 +149,35 @@ export class BirdScene {
     this._createSparks()
     this._createShield()
     this._createLeaderFx()
+    this._createCannons()
+    this._createBombs()
 
     this.ripples = []
     this.pulses = []
+    this.bullets = []
+    this.flashes = []
     this.totalImpacts = 0
     this.totalBlocks = 0
+    this.totalKills = 0
+    this.totalCollisions = 0
+    this.totalShots = 0
+    this.totalBombsLaunched = 0
+    this.totalBombExplosions = 0
+    this.totalBombIntercepts = 0
     this.shieldFlash = 0
+    this.targetHitFlash = 0
     this.communicationFlash = 0
     this.lastCommandVersion = -1
     this.lastStrategyVersion = -1
+    this.lastBattleState = 'idle'
     this._labelText = new Array(SQUAD_COUNT).fill('')
+
+    this._cannonForward = new THREE.Vector3(0, 0, 1)
+    this._cannonDir = new THREE.Vector3()
+    this._bulletAxis = new THREE.Vector3()
+    this._markerHealthy = new THREE.Color(0xffa273)
+    this._markerCritical = new THREE.Color(0xff3350)
+    this._markerColor = new THREE.Color()
 
     this._raycaster = new THREE.Raycaster()
     this._pointer = new THREE.Vector2()
@@ -182,11 +216,14 @@ export class BirdScene {
 
     this.colorAttr = new THREE.InstancedBufferAttribute(colors, 3)
     this.phaseAttr = new THREE.InstancedBufferAttribute(phases, 1)
+    this.healthAttr = new THREE.InstancedBufferAttribute(this.sim.health, 1)
+    this.healthAttr.setUsage(THREE.DynamicDrawUsage)
 
     geometry.setAttribute('aOffset', this.offsetAttr)
     geometry.setAttribute('aVelocity', this.velocityAttr)
     geometry.setAttribute('aColor', this.colorAttr)
     geometry.setAttribute('aPhase', this.phaseAttr)
+    geometry.setAttribute('aHealth', this.healthAttr)
 
     this.geometry = geometry
     this.material = new THREE.ShaderMaterial({
@@ -423,6 +460,214 @@ export class BirdScene {
     this.scene.add(this.shieldGroup)
   }
 
+  /** Bombas de expansión: cuerpo, halo, área de explosión y trayectoria. */
+  _createBombs() {
+    this.bombRigs = []
+    this.blasts = []
+
+    for (let i = 0; i < BOMB_COUNT; i += 1) {
+      const group = new THREE.Group()
+      group.visible = false
+
+      const coreGeometry = new THREE.IcosahedronGeometry(0.72, 1)
+      const coreMaterial = new THREE.MeshBasicMaterial({
+        color: 0xffd08a,
+        transparent: true,
+        opacity: 0.95,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      })
+      const core = new THREE.Mesh(coreGeometry, coreMaterial)
+      group.add(core)
+
+      const haloGeometry = new THREE.SphereGeometry(1.45, 16, 12)
+      const haloMaterial = new THREE.MeshBasicMaterial({
+        color: 0xff6b4a,
+        transparent: true,
+        opacity: 0.32,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      })
+      const halo = new THREE.Mesh(haloGeometry, haloMaterial)
+      group.add(halo)
+
+      this.scene.add(group)
+
+      // Anillo del área de explosión, orientado a cámara.
+      const ringGeometry = new THREE.RingGeometry(
+        BOMB_RADIUS - 0.6,
+        BOMB_RADIUS,
+        84,
+      )
+      const ringMaterial = new THREE.MeshBasicMaterial({
+        color: 0xff8a5c,
+        transparent: true,
+        opacity: 0,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        depthTest: false,
+        blending: THREE.AdditiveBlending,
+      })
+      const ring = new THREE.Mesh(ringGeometry, ringMaterial)
+      ring.visible = false
+      ring.renderOrder = 6
+      this.scene.add(ring)
+
+      // Trayectoria prevista: deja ver que la bomba es lenta.
+      const lineGeometry = new THREE.BufferGeometry()
+      lineGeometry.setAttribute(
+        'position',
+        new THREE.Float32BufferAttribute(new Float32Array(6), 3),
+      )
+      const lineMaterial = new THREE.LineBasicMaterial({
+        color: 0xffa06a,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      })
+      const line = new THREE.Line(lineGeometry, lineMaterial)
+      line.frustumCulled = false
+      line.visible = false
+      this.scene.add(line)
+
+      this.bombRigs.push({
+        group,
+        core,
+        halo,
+        ring,
+        line,
+        lineGeometry,
+        lineMaterial,
+        ringMaterial,
+      })
+    }
+  }
+
+  /** Onda de explosión de una bomba. */
+  _spawnBlast(x, y, z, radius) {
+    const geometry = new THREE.RingGeometry(0.9, 1, 96)
+    const material = new THREE.MeshBasicMaterial({
+      color: 0xffb45c,
+      transparent: true,
+      opacity: 0.8,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    })
+    const mesh = new THREE.Mesh(geometry, material)
+    mesh.position.set(x, y, z)
+    mesh.scale.setScalar(0.5)
+    this.scene.add(mesh)
+    this.blasts.push({ mesh, age: 0, life: 0.8, radius })
+  }
+
+  _createCannons() {
+    this.cannonRigs = []
+
+    for (let c = 0; c < CANNON_MOUNTS.length; c += 1) {
+      const group = new THREE.Group()
+      group.visible = false
+
+      const baseGeometry = new THREE.SphereGeometry(0.7, 12, 8)
+      const baseMaterial = new THREE.MeshBasicMaterial({
+        color: 0xffb08a,
+        transparent: true,
+        opacity: 0.9,
+        depthWrite: false,
+      })
+      const base = new THREE.Mesh(baseGeometry, baseMaterial)
+      group.add(base)
+
+      const barrelGeometry = new THREE.CylinderGeometry(0.16, 0.26, 3.0, 10)
+      barrelGeometry.rotateX(Math.PI / 2)
+      const barrelMaterial = new THREE.MeshBasicMaterial({
+        color: 0xff9a76,
+        transparent: true,
+        opacity: 0.92,
+        depthWrite: false,
+      })
+      const barrel = new THREE.Mesh(barrelGeometry, barrelMaterial)
+      barrel.position.z = 1.5
+      group.add(barrel)
+
+      const tipGeometry = new THREE.SphereGeometry(0.3, 10, 8)
+      const tipMaterial = new THREE.MeshBasicMaterial({
+        color: 0xfff1d6,
+        transparent: true,
+        opacity: 0.85,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      })
+      const tip = new THREE.Mesh(tipGeometry, tipMaterial)
+      tip.position.z = 3.05
+      group.add(tip)
+
+      // Resplandor de la boca: se mantiene encendido mientras el cañón
+      // dispara, para que la ráfaga se lea como fuego continuo.
+      const glowGeometry = new THREE.SphereGeometry(1.15, 12, 10)
+      const glowMaterial = new THREE.MeshBasicMaterial({
+        color: 0xffd9a0,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      })
+      const glow = new THREE.Mesh(glowGeometry, glowMaterial)
+      glow.position.z = 3.05
+      group.add(glow)
+
+      this.scene.add(group)
+
+      const lineGeometry = new THREE.BufferGeometry()
+      lineGeometry.setAttribute(
+        'position',
+        new THREE.Float32BufferAttribute(new Float32Array(6), 3),
+      )
+      const lineMaterial = new THREE.LineBasicMaterial({
+        color: 0x9fe8ff,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      })
+      const line = new THREE.Line(lineGeometry, lineMaterial)
+      line.frustumCulled = false
+      line.visible = false
+      this.scene.add(line)
+
+      const markerGeometry = new THREE.RingGeometry(0.34, 0.5, 28)
+      const markerMaterial = new THREE.MeshBasicMaterial({
+        color: 0xbff6ff,
+        transparent: true,
+        opacity: 0,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        depthTest: false,
+        blending: THREE.AdditiveBlending,
+      })
+      const marker = new THREE.Mesh(markerGeometry, markerMaterial)
+      marker.visible = false
+      marker.renderOrder = 8
+      this.scene.add(marker)
+
+      this.cannonRigs.push({
+        group,
+        base,
+        barrel,
+        tip,
+        glow,
+        glowGeometry,
+        glowMaterial,
+        line,
+        marker,
+        lineGeometry,
+        lineMaterial,
+        markerMaterial,
+      })
+    }
+  }
+
   _createLeaderFx() {
     this.leaderHaloes = []
     this.leaderLabels = []
@@ -626,10 +871,336 @@ export class BirdScene {
       0.26 + 0.08 * Math.sin(elapsed * 3) + this.communicationFlash * 0.5
   }
 
+  /** Fogonazo: destello breve en la boca del cañón al disparar. */
+  _spawnFlash(x, y, z) {
+    const geometry = new THREE.SphereGeometry(0.9, 10, 8)
+    const material = new THREE.MeshBasicMaterial({
+      color: 0xfff0c8,
+      transparent: true,
+      opacity: 1,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    })
+    const mesh = new THREE.Mesh(geometry, material)
+    mesh.position.set(x, y, z)
+    this.scene.add(mesh)
+    this.flashes.push({ mesh, geometry, material, age: 0, life: 0.16 })
+  }
+
+  /**
+   * Cada disparo de la metralleta es una bala que viaja desde la boca del
+   * cañón hasta su punto de impacto: no una línea, sino un proyectil en
+   * vuelo. Varios a la vez forman el flujo continuo de fuego.
+   */
+  _spawnBullet(shot) {
+    const dx = shot.x2 - shot.x1
+    const dy = shot.y2 - shot.y1
+    const dz = shot.z2 - shot.z1
+    const length = Math.hypot(dx, dy, dz) || 1
+    const travel = length / BULLET_SPEED
+
+    // Proyectil luminoso: se ve desde cualquier ángulo, no como una línea.
+    const geometry = new THREE.SphereGeometry(0.34, 8, 6)
+    const material = new THREE.MeshBasicMaterial({
+      color: shot.hit ? 0xffffff : 0xd6f8ff,
+      transparent: true,
+      opacity: 1,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    })
+    const mesh = new THREE.Mesh(geometry, material)
+    mesh.frustumCulled = false
+    mesh.position.set(shot.x1, shot.y1, shot.z1)
+    // Se estira en la dirección del disparo: deja una estela corta.
+    mesh.scale.set(1, 1, 3.4)
+    this.scene.add(mesh)
+
+    this.bullets.push({
+      mesh,
+      geometry,
+      material,
+      x1: shot.x1,
+      y1: shot.y1,
+      z1: shot.z1,
+      x2: shot.x2,
+      y2: shot.y2,
+      z2: shot.z2,
+      dirX: dx / length,
+      dirY: dy / length,
+      dirZ: dz / length,
+      travelled: 0,
+      total: length,
+      life: travel + 0.26,
+      hit: shot.hit,
+    })
+  }
+
+  _updateCombatFx(dt, elapsed) {
+    const sim = this.sim
+    const target = sim.target
+    const info = sim.getCombatInfo()
+    const targetVisible = Boolean(target)
+
+    for (let c = 0; c < this.cannonRigs.length; c += 1) {
+      const rig = this.cannonRigs[c]
+      const cannon = info.cannons[c]
+      const visible =
+        targetVisible && info.battleState !== 'target-down' && Boolean(cannon)
+      rig.group.visible = visible
+      rig.line.visible = false
+      rig.marker.visible = visible && cannon.charge > 0.02
+      if (!visible) continue
+
+      const mount = CANNON_MOUNTS[c]
+      rig.group.position.set(
+        target.x + mount.x,
+        target.y + mount.y,
+        target.z + mount.z,
+      )
+      this._cannonDir.set(cannon.dirX, cannon.dirY, cannon.dirZ)
+      if (this._cannonDir.lengthSq() < 1e-6) this._cannonDir.set(1, 0, 0)
+      this._cannonDir.normalize()
+      rig.group.quaternion.setFromUnitVectors(
+        this._cannonForward,
+        this._cannonDir,
+      )
+
+      const charge = cannon.charge
+      const firing = cannon.firing
+      rig.tip.material.color.setRGB(
+        1,
+        0.95 - charge * 0.45,
+        0.85 - charge * 0.62,
+      )
+      rig.tip.scale.setScalar(
+        1 + charge * 0.9 + Math.sin(elapsed * 34 + c) * 0.1 * charge,
+      )
+
+      // Resplandor de la boca del cañón mientras dure la ráfaga.
+      const flicker = 0.75 + Math.sin(elapsed * 47 + c * 2.1) * 0.25
+      rig.glowMaterial.opacity +=
+        ((firing ? 0.45 * flicker : 0) - rig.glowMaterial.opacity) *
+        Math.min(1, dt * 18)
+      rig.glow.scale.setScalar(firing ? 0.9 + flicker * 0.45 : 0.6)
+      rig.barrel.material.color.setRGB(
+        1,
+        0.62 - charge * 0.38,
+        0.48 - charge * 0.28,
+      )
+
+      if (rig.marker.visible) {
+        rig.marker.position.set(cannon.aimX, cannon.aimY, cannon.aimZ)
+        rig.marker.quaternion.copy(this.camera.quaternion)
+        rig.marker.scale.setScalar(0.55 + charge * 1.45)
+        rig.markerMaterial.opacity = 0.18 + charge * 0.55
+      }
+    }
+
+    const shots = sim.consumeShots()
+    this.totalShots += shots.length
+    for (const shot of shots) {
+      this._spawnBullet(shot)
+      // Fogonazo en la boca del cañón: el fuego se ve continuo.
+      const dx = shot.x2 - shot.x1
+      const dy = shot.y2 - shot.y1
+      const dz = shot.z2 - shot.z1
+      const length = Math.hypot(dx, dy, dz) || 1
+      this._spawnFlash(
+        shot.x1 + (dx / length) * 3,
+        shot.y1 + (dy / length) * 3,
+        shot.z1 + (dz / length) * 3,
+      )
+    }
+
+    for (let i = this.bullets.length - 1; i >= 0; i -= 1) {
+      const bullet = this.bullets[i]
+      bullet.life -= dt
+      bullet.travelled += BULLET_SPEED * dt
+
+      const t = Math.min(1, bullet.travelled / bullet.total)
+      bullet.mesh.position.set(
+        bullet.x1 + (bullet.x2 - bullet.x1) * t,
+        bullet.y1 + (bullet.y2 - bullet.y1) * t,
+        bullet.z1 + (bullet.z2 - bullet.z1) * t,
+      )
+      this._bulletAxis.set(bullet.dirX, bullet.dirY, bullet.dirZ)
+      bullet.mesh.quaternion.setFromUnitVectors(
+        this._cannonForward,
+        this._bulletAxis,
+      )
+      // La bala deja una estela breve al llegar: el flujo se ve continuo.
+      bullet.material.opacity = Math.min(1, bullet.life / 0.26)
+
+      if (bullet.life <= 0) {
+        if (bullet.hit) {
+          this._spawnSpark(bullet.x2, bullet.y2, bullet.z2, 0.5, 2, 7, 'hit')
+        }
+        this.scene.remove(bullet.mesh)
+        bullet.geometry.dispose()
+        bullet.material.dispose()
+        this.bullets.splice(i, 1)
+      }
+    }
+
+    for (let i = this.flashes.length - 1; i >= 0; i -= 1) {
+      const flash = this.flashes[i]
+      flash.age += dt
+      const t = Math.min(1, flash.age / flash.life)
+      flash.mesh.scale.setScalar(0.5 + t * 2.1)
+      flash.material.opacity = (1 - t) * 1
+      if (t >= 1) {
+        this.scene.remove(flash.mesh)
+        flash.geometry.dispose()
+        flash.material.dispose()
+        this.flashes.splice(i, 1)
+      }
+    }
+
+    const kills = sim.consumeKills()
+    this.totalKills += kills.length
+    for (const kill of kills) {
+      for (let i = 0; i < 14; i += 1) {
+        this._spawnSpark(kill.x, kill.y, kill.z, 0.7, 3, 11, 'kill')
+      }
+    }
+
+    const collisions = sim.consumeCollisions()
+    this.totalCollisions += collisions
+    if (collisions > 0 && target) {
+      this.targetHitFlash = Math.min(1.6, this.targetHitFlash + 0.6)
+      const spawn = Math.min(collisions, 5)
+      for (let i = 0; i < spawn; i += 1) {
+        this._spawnSpark(target.x, target.y, target.z, 1.4, 2.5, 9, 'impact')
+      }
+    }
+
+    // La salud del objetivo tiñe el marcador de naranja a rojo.
+    const healthRatio = THREE.MathUtils.clamp(
+      info.targetHealth / TARGET_MAX_HEALTH,
+      0,
+      1,
+    )
+    this._markerColor
+      .copy(this._markerHealthy)
+      .lerp(this._markerCritical, 1 - healthRatio)
+    if (this.markerRing) this.markerRing.material.color.copy(this._markerColor)
+    if (this.markerArc) this.markerArc.material.color.copy(this._markerColor)
+    if (this.markerGlow) this.markerGlow.material.color.copy(this._markerColor)
+
+    if (info.battleState !== this.lastBattleState) {
+      if (info.battleState === 'target-down' && target) {
+        for (let i = 0; i < 34; i += 1) {
+          this._spawnSpark(target.x, target.y, target.z, 2.2, 4, 16, 'kill')
+        }
+        this._spawnPulse(target)
+        this.targetHitFlash = 1.6
+      }
+      this.lastBattleState = info.battleState
+    }
+
+    this.targetHitFlash = Math.max(0, this.targetHitFlash - dt * 1.7)
+  }
+
+  /** Bombas de expansión: Dibujado, área de explosión y ondas. */
+  _updateBombFx(dt, elapsed) {
+    const sim = this.sim
+    const bombs = sim.getCombatInfo().bombs
+
+    for (let b = 0; b < this.bombRigs.length; b += 1) {
+      const rig = this.bombRigs[b]
+      const bomb = bombs[b]
+
+      if (!bomb) {
+        rig.group.visible = false
+        rig.ring.visible = false
+        rig.line.visible = false
+        continue
+      }
+
+      rig.group.visible = true
+      rig.group.position.set(bomb.x, bomb.y, bomb.z)
+
+      const pulse = (Math.sin(elapsed * 6 + bomb.id) + 1) / 2
+      const armed = bomb.arm <= 0
+      rig.core.rotation.x = elapsed * 1.4
+      rig.core.rotation.y = elapsed * 1.9
+      rig.core.scale.setScalar(0.85 + pulse * 0.35)
+      rig.halo.scale.setScalar(1 + pulse * 0.45)
+      // Mientras se arma, parpadea: avisa de que aún no se puede derribar.
+      const blink = armed ? 1 : (Math.sin(elapsed * 22) + 1) / 2
+      rig.halo.material.opacity = (0.2 + pulse * 0.22) * (armed ? 1 : blink)
+      rig.core.material.color.setRGB(
+        1,
+        0.78 - pulse * 0.3,
+        0.5 - pulse * 0.35,
+      )
+
+      // Área de explosión: anillo que late sobre el punto de detonación.
+      rig.ring.visible = true
+      rig.ring.position.set(bomb.aimX, bomb.aimY, bomb.aimZ)
+      rig.ring.quaternion.copy(this.camera.quaternion)
+      const radiusPulse = (Math.sin(elapsed * 4 + bomb.id) + 1) / 2
+      rig.ring.scale.setScalar(0.97 + radiusPulse * 0.05)
+      rig.ringMaterial.opacity = 0.14 + radiusPulse * 0.14
+
+      // Trayectoria: el enjambre ve por dónde pasa la bomba.
+      rig.line.visible = true
+      const positions = rig.lineGeometry.attributes.position
+      positions.array[0] = bomb.x
+      positions.array[1] = bomb.y
+      positions.array[2] = bomb.z
+      positions.array[3] = bomb.aimX
+      positions.array[4] = bomb.aimY
+      positions.array[5] = bomb.aimZ
+      positions.needsUpdate = true
+      rig.lineMaterial.opacity = 0.16 + radiusPulse * 0.14
+    }
+
+    const events = sim.consumeBombs()
+    for (const event of events) {
+      if (event.type === 'explode') {
+        this.totalBombExplosions += 1
+        this._spawnBlast(event.x, event.y, event.z, event.radius)
+        for (let i = 0; i < 26; i += 1) {
+          this._spawnSpark(event.x, event.y, event.z, 1.6, 3, 13, 'kill')
+        }
+      } else if (event.type === 'intercept') {
+        this.totalBombIntercepts += 1
+        for (let i = 0; i < 12; i += 1) {
+          this._spawnSpark(event.x, event.y, event.z, 0.7, 2, 8, 'hit')
+        }
+      } else if (event.type === 'launch') {
+        this.totalBombsLaunched += 1
+        for (let i = 0; i < 10; i += 1) {
+          this._spawnSpark(event.x, event.y, event.z, 0.9, 2, 7, 'impact')
+        }
+      }
+    }
+
+    for (let i = this.blasts.length - 1; i >= 0; i -= 1) {
+      const blast = this.blasts[i]
+      blast.age += dt
+      const t = Math.min(blast.age / blast.life, 1)
+      const eased = 1 - Math.pow(1 - t, 3)
+      blast.mesh.quaternion.copy(this.camera.quaternion)
+      blast.mesh.scale.setScalar(0.6 + eased * blast.radius)
+      blast.mesh.material.opacity = (1 - t) * 0.75
+      if (t >= 1) {
+        this.scene.remove(blast.mesh)
+        blast.mesh.geometry.dispose()
+        blast.mesh.material.dispose()
+        this.blasts.splice(i, 1)
+      }
+    }
+  }
+
   _updateDefenseFx(dt) {
     const sim = this.sim
     const target = sim.target
-    const active = Boolean(target) && sim.params.defense > 0.05
+    const active =
+      Boolean(target) &&
+      sim.params.defense > 0.05 &&
+      sim.battleState === 'active'
 
     const blocks = sim.consumeBlocks()
     if (blocks > 0) {
@@ -724,7 +1295,11 @@ export class BirdScene {
     const colors =
       palette === 'down'
         ? [0xffb27a, 0xff7a6b, 0xff4d5e]
-        : [0xffd9a0, 0xffa074, 0xff6b5c]
+        : palette === 'kill'
+          ? [0xffffff, 0xbff6ff, 0x7f9cff]
+          : palette === 'hit'
+            ? [0xe8ffff, 0x9fe8ff, 0xffffff]
+            : [0xffd9a0, 0xffa074, 0xff6b5c]
     spark.sprite.material.color.setHex(
       colors[Math.floor(Math.random() * colors.length)],
     )
@@ -777,7 +1352,11 @@ export class BirdScene {
     this.controls.autoRotate = false
   }
 
-  /** Convierte un clic de pantalla en un punto 3D sobre el plano de la cámara. */
+  /**
+   * Convierte un clic de pantalla en un punto 3D sobre el plano de la
+   * cámara. El objetivo queda justo bajo el cursor en toda la página; solo
+   * se limita al volumen operativo para que el enjambre pueda alcanzarlo.
+   */
   pickTarget(clientX, clientY) {
     const rect = this.canvas.getBoundingClientRect()
     this._pointer.set(
@@ -793,10 +1372,13 @@ export class BirdScene {
     }
 
     const clamp = (value, max) => Math.min(Math.max(value, -max), max)
+    const maxX = PLAY_BOUNDS.x * 0.83
+    const maxY = PLAY_BOUNDS.y * 0.83
+    const maxZ = PLAY_BOUNDS.z * 0.83
     return {
-      x: clamp(this._hit.x, BOUNDS.x * 0.9),
-      y: clamp(this._hit.y, BOUNDS.y * 0.9),
-      z: clamp(this._hit.z, BOUNDS.z * 0.9),
+      x: clamp(this._hit.x, maxX),
+      y: clamp(this._hit.y, maxY),
+      z: clamp(this._hit.z, maxZ),
     }
   }
 
@@ -863,6 +1445,7 @@ export class BirdScene {
     this.geometry.instanceCount = this.sim.count
     this.offsetAttr.needsUpdate = true
     this.velocityAttr.needsUpdate = true
+    this.healthAttr.needsUpdate = true
 
     // Marcador del destino.
     const target = this.sim.target
@@ -871,14 +1454,26 @@ export class BirdScene {
       this.marker.position.set(target.x, target.y, target.z)
       this.marker.quaternion.copy(this.camera.quaternion)
 
-      const pulse = (Math.sin(elapsed * 2.6) + 1) / 2
-      this.markerRing.scale.setScalar(1 + pulse * 0.16)
-      this.markerRing.material.opacity = 0.32 + pulse * 0.28
+      const healthRatio = Math.max(
+        0,
+        Math.min(1, this.sim.targetHealth / TARGET_MAX_HEALTH),
+      )
+      const pulse = (Math.sin(elapsed * (2.6 + (1 - healthRatio) * 4)) + 1) / 2
+      this.markerRing.scale.setScalar(
+        1 + pulse * 0.16 + this.targetHitFlash * 0.12,
+      )
+      this.markerRing.material.opacity =
+        0.32 + pulse * 0.28 + this.targetHitFlash * 0.25
       this.markerArc.rotation.z = elapsed * 0.55
       this.markerGlow.material.opacity =
-        0.26 + pulse * 0.12 + this.sim.pulseCharge * 0.18
+        0.26 +
+        pulse * 0.12 +
+        this.sim.pulseCharge * 0.18 +
+        this.targetHitFlash * 0.4
     }
 
+    this._updateCombatFx(dt, elapsed)
+    this._updateBombFx(dt, elapsed)
     this._updateDefenseFx(dt)
     this._updateLeaderFx(dt, elapsed)
     this._updateSparks(dt)
@@ -986,6 +1581,48 @@ export class BirdScene {
       if (child.geometry) child.geometry.dispose()
       if (child.material) child.material.dispose()
     })
+
+    for (const rig of this.cannonRigs) {
+      rig.group.traverse((child) => {
+        if (child.geometry) child.geometry.dispose()
+        if (child.material) child.material.dispose()
+      })
+      rig.glowGeometry.dispose()
+      rig.glowMaterial.dispose()
+      rig.lineGeometry.dispose()
+      rig.lineMaterial.dispose()
+      rig.marker.geometry.dispose()
+      rig.markerMaterial.dispose()
+    }
+
+    for (const bullet of this.bullets) {
+      bullet.geometry.dispose()
+      bullet.material.dispose()
+    }
+    this.bullets = []
+
+    for (const flash of this.flashes) {
+      flash.geometry.dispose()
+      flash.material.dispose()
+    }
+    this.flashes = []
+
+    for (const rig of this.bombRigs) {
+      rig.group.traverse((child) => {
+        if (child.geometry) child.geometry.dispose()
+        if (child.material) child.material.dispose()
+      })
+      rig.ring.geometry.dispose()
+      rig.ringMaterial.dispose()
+      rig.lineGeometry.dispose()
+      rig.lineMaterial.dispose()
+    }
+
+    for (const blast of this.blasts) {
+      blast.mesh.geometry.dispose()
+      blast.mesh.material.dispose()
+    }
+    this.blasts = []
 
     this.marker.traverse((child) => {
       if (child.geometry) child.geometry.dispose()
