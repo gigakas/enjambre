@@ -87,9 +87,10 @@ export function useBoids() {
   function frame(now) {
     rafId = requestAnimationFrame(frame)
     if (!lastFrame) lastFrame = now
-    let dt = (now - lastFrame) / 1000
+    const rawDt = (now - lastFrame) / 1000
     lastFrame = now
-    dt = Math.min(dt, 0.05)
+    // La simulación usa un dt acotado; el FPS debe medir el frame real.
+    const dt = Math.min(rawDt, 0.05)
 
     if (!sim || !scene) return
 
@@ -98,7 +99,7 @@ export function useBoids() {
     scene.update(dt, elapsed)
     scene.render()
 
-    fpsAccum += dt
+    fpsAccum += rawDt
     fpsFrames += 1
     if (fpsAccum >= 0.5) {
       fps.value = Math.round(fpsFrames / fpsAccum)

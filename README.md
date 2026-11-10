@@ -84,6 +84,15 @@ El resultado queda en `dist/`.
 | `npm run dev` | Servidor de desarrollo con recarga en caliente |
 | `npm run build` | Compila la versión de producción |
 | `npm run preview` | Sirve localmente la compilación de producción |
+| `npm test` | Tests unitarios de la simulación con `node --test` |
+
+### Tests
+
+```bash
+npm test
+```
+
+Cubren los códigos y la cadena de mando, los relevos, la instantánea de líderes del pulso, las transiciones de la FSM, los impactos y la rejilla espacial. La simulación acepta `seed` o `rng` en el constructor para que las pruebas sean deterministas.
 
 ## Uso
 
@@ -200,7 +209,7 @@ Además, el objetivo libera un **pulso radial** cada 5–7 segundos:
 - Los líderes alcanzados son derribados.
 - Los líderes que pueden caer se fijan al inicio del pulso. Así, un reemplazo promovido durante el mismo pulso queda a salvo y no se produce una cadena de derribos.
 
-En los últimos ~2.2 s antes del pulso, el objetivo brilla más y la estrategia cambia a **repliegue**. Las aves que están atacando y se encuentran dentro del radio de peligro se retiran antes de la onda.
+El objetivo empieza a brillar ~2.2 s antes del pulso. En el último ~1 s (cuando la carga supera `RETREAT_CHARGE = 0.55`), la estrategia cambia a **repliegue**: las aves que están atacando y se encuentran dentro del radio de peligro se retiran antes de la onda.
 
 ![Pulso defensivo](docs/enjambre-defensa.webp)
 
@@ -341,20 +350,29 @@ En pantallas estrechas la cámara se encuadra automáticamente; si la relación 
 ```text
 src/
 ├── App.vue                  Interfaz, panel, cadena de mando y HUD
+├── App.css                  Estilos del componente App
 ├── main.js                  Punto de entrada de Vue
 ├── style.css                Estilos base
 ├── composables/
 │   └── useBoids.js          RAF, resize, eventos de puntero y puente Vue
 └── lib/
-    ├── flock3d.js           Boids, rejilla, FSM, juego, defensa y jerarquía
+    ├── constants.js         Constantes, estados y parámetros por defecto
+    ├── palette.js           Colores compartidos por render y HUD
+    ├── random.js            PRNG seedable para tests y depuración
+    ├── spatialGrid.js       Rejilla espacial (counting sort)
+    ├── sectors.js           Sectores y juego de congestión
+    ├── commandChain.js      Códigos, líderes, comandante y relevos
+    ├── defense.js           Escudo direccional y pulsos
+    ├── steering.js          Boids, FSM, integración y bordes
+    ├── flock3d.js           Orquestación de la simulación y API pública
     └── birdScene.js         Three.js: instancing, shader, escudo, pulsos,
                              etiquetas, enlaces y cámara
 ```
 
 Separación de responsabilidades:
 
-- `flock3d.js` no conoce Vue ni Three.js: es simulación pura sobre `Float32Array` y `Uint8Array`.
-- `birdScene.js` no conoce la lógica interna del juego: lee posiciones, estados, escudo y eventos de la simulación y los dibuja.
+- `flock3d.js` orquesta los sistemas y no conoce Vue ni Three.js. `constants.js`, `random.js`, `spatialGrid.js`, `sectors.js`, `commandChain.js`, `defense.js` y `steering.js` son lógica pura sobre arrays tipados.
+- `birdScene.js` no conoce la lógica interna del juego: consume una vista de solo lectura (`getRenderState()`), dibuja la escena y consume los eventos de impactos, bloqueos, pulsos y derribos.
 - `useBoids.js` conecta ambos con la reactividad de Vue: crea la simulación y la escena, ejecuta el bucle de animación, procesa clics y publica estadísticas.
 
 Flujo de datos:
@@ -372,9 +390,10 @@ App.vue ──parámetros/cantidad──► useBoids ──► Flock3D
 2. Si no está en pausa, `Flock3D.update(dt)`:
    - reconstruye la rejilla espacial,
    - actualiza la defensa y los pulsos,
+   - actualiza la estrategia de escuadrones,
    - recupera líderes derribados,
-   - recorre las aves: vecinas, fuerzas, FSM, planificación y integración,
-   - actualiza escudo, estrategia y estado de la jerarquía.
+   - delega el paso de vuelo en `SteeringSystem` (vecinas, fuerzas, FSM,
+     planificación e integración).
 3. `BirdScene.update(dt, tiempo)`:
    - actualiza el tamaño y la intensidad adaptativos,
    - sube posiciones y velocidades a la GPU,
@@ -400,7 +419,7 @@ App.vue ──parámetros/cantidad──► useBoids ──► Flock3D
 
 ### Constantes de simulación
 
-Están en `src/lib/flock3d.js`:
+Están en `src/lib/constants.js`:
 
 | Constante | Valor | Uso |
 | --- | ---: | --- |
@@ -415,6 +434,7 @@ Están en `src/lib/flock3d.js`:
 | `SHIELD_RADIUS` | 9.5 | Radio del escudo |
 | `SHIELD_ANGLE` | 0.95 rad | Semiangulo del cono del escudo |
 | `PULSE_RADIUS` | 15 | Radio del pulso defensivo |
+| `RETREAT_CHARGE` | 0.55 | Carga de pulso que activa el repliegue |
 | `LEADER_DOWN_TIME` | ~6 s | Recuperación de un líder |
 | `STRATEGY_INTERVAL` | ~2.4 s | Reunión de líderes |
 

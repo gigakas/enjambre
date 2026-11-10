@@ -2,16 +2,18 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import {
   BOUNDS,
+  clamp,
   MAX_BOIDS,
   PULSE_RADIUS,
   SHIELD_ANGLE,
   SHIELD_RADIUS,
   SQUAD_COUNT,
 } from './flock3d'
-
-const SQUAD_HUES = [0.48, 0.6, 0.73, 0.86]
-const SQUAD_COLORS = [0x63e6ff, 0x7f9cff, 0xb18cff, 0xff8fd0]
-const SQUAD_COLORS_CSS = ['#63e6ff', '#7f9cff', '#b18cff', '#ff8fd0']
+import {
+  SQUAD_COLORS,
+  SQUAD_COLORS_CSS,
+  SQUAD_HUES,
+} from './palette'
 
 const WING_VERTICES = new Float32Array([
   // Ala izquierda
@@ -88,6 +90,7 @@ export class BirdScene {
   constructor(canvas, simulation) {
     this.canvas = canvas
     this.sim = simulation
+    this.view = simulation.getRenderState()
     this.clockTime = 0
 
     this.scene = new THREE.Scene()
@@ -526,15 +529,15 @@ export class BirdScene {
   }
 
   _refreshLeaderLabels() {
-    const sim = this.sim
+    const view = this.view
     for (let s = 0; s < SQUAD_COUNT; s += 1) {
-      const index = sim.leaderOfSquad[s]
-      if (index < 0 || index >= sim.count) {
+      const index = view.leaderOfSquad[s]
+      if (index < 0 || index >= view.count) {
         this._labelText[s] = ''
         continue
       }
-      const isCommander = index === sim.commander
-      const code = sim.getCode(index)
+      const isCommander = index === view.commander
+      const code = this.sim.getCode(index)
       const text = isCommander ? `CMD · ${code}` : code
       if (text === this._labelText[s]) continue
 
@@ -548,20 +551,20 @@ export class BirdScene {
   }
 
   _updateLeaderFx(dt, elapsed) {
-    const sim = this.sim
-    if (sim.commandVersion !== this.lastCommandVersion) {
-      this.lastCommandVersion = sim.commandVersion
+    const view = this.view
+    if (view.commandVersion !== this.lastCommandVersion) {
+      this.lastCommandVersion = view.commandVersion
       this._refreshLeaderLabels()
     }
-    if (sim.strategyVersion !== this.lastStrategyVersion) {
-      this.lastStrategyVersion = sim.strategyVersion
+    if (view.strategyVersion !== this.lastStrategyVersion) {
+      this.lastStrategyVersion = view.strategyVersion
       this.communicationFlash = 1
     }
     this.communicationFlash = Math.max(0, this.communicationFlash - dt * 1.6)
 
-    const positions = sim.positions
-    const leaders = sim.leaderOfSquad
-    const commander = sim.commander
+    const positions = view.positions
+    const leaders = view.leaderOfSquad
+    const commander = view.commander
     const distanceFactor = THREE.MathUtils.clamp(
       this.camera.position.distanceTo(this.controls.target) / 85,
       1,
@@ -573,7 +576,7 @@ export class BirdScene {
       const index = leaders[s]
       const halo = this.leaderHaloes[s]
       const label = this.leaderLabels[s]
-      if (index < 0 || index >= sim.count) {
+      if (index < 0 || index >= view.count) {
         halo.visible = false
         label.visible = false
         continue
@@ -602,7 +605,7 @@ export class BirdScene {
 
     const linkPositions = this.leaderLinks.geometry.attributes.position
     let segment = 0
-    if (commander >= 0 && commander < sim.count) {
+    if (commander >= 0 && commander < view.count) {
       const c3 = commander * 3
       const cx = positions[c3]
       const cy = positions[c3 + 1]
@@ -628,8 +631,9 @@ export class BirdScene {
 
   _updateDefenseFx(dt) {
     const sim = this.sim
-    const target = sim.target
-    const active = Boolean(target) && sim.params.defense > 0.05
+    const view = this.view
+    const target = view.target
+    const active = Boolean(target) && view.defenseActive
 
     const blocks = sim.consumeBlocks()
     if (blocks > 0) {
@@ -646,14 +650,14 @@ export class BirdScene {
     if (active) {
       this.shieldGroup.position.set(target.x, target.y, target.z)
       this._shieldDir
-        .set(sim.shield.x, sim.shield.y, sim.shield.z)
+        .set(view.shield.x, view.shield.y, view.shield.z)
         .normalize()
       this.shieldGroup.quaternion.setFromUnitVectors(
         this._shieldAxis,
         this._shieldDir,
       )
 
-      const charge = sim.pulseCharge
+      const charge = view.pulseCharge
       this.shieldCapMaterial.opacity = 0.08 + charge * 0.08 + this.shieldFlash * 0.22
       this.shieldRimMaterial.opacity =
         0.32 + charge * 0.3 + this.shieldFlash * 0.4
@@ -792,11 +796,10 @@ export class BirdScene {
       return null
     }
 
-    const clamp = (value, max) => Math.min(Math.max(value, -max), max)
     return {
-      x: clamp(this._hit.x, BOUNDS.x * 0.9),
-      y: clamp(this._hit.y, BOUNDS.y * 0.9),
-      z: clamp(this._hit.z, BOUNDS.z * 0.9),
+      x: clamp(this._hit.x, -BOUNDS.x * 0.9, BOUNDS.x * 0.9),
+      y: clamp(this._hit.y, -BOUNDS.y * 0.9, BOUNDS.y * 0.9),
+      z: clamp(this._hit.z, -BOUNDS.z * 0.9, BOUNDS.z * 0.9),
     }
   }
 
@@ -835,12 +838,13 @@ export class BirdScene {
 
   update(dt, elapsed) {
     this.clockTime = elapsed
+    this.view = this.sim.getRenderState()
     this.controls.update()
 
     // Tamaño adaptativo: más aves, aves más pequeñas.
     const targetSize = Math.min(
       1.15,
-      Math.max(0.5, Math.pow(100 / Math.max(this.sim.count, 1), 0.16)),
+      Math.max(0.5, Math.pow(100 / Math.max(this.view.count, 1), 0.16)),
     )
     const material = this.material
     const camDistance = this.camera.position.distanceTo(this.controls.target)
@@ -852,7 +856,7 @@ export class BirdScene {
     // Atenúa el brillo aditivo cuando hay muchas aves superpuestas.
     const targetIntensity = Math.min(
       1,
-      Math.max(0.27, Math.pow(220 / Math.max(this.sim.count, 1), 0.42)),
+      Math.max(0.27, Math.pow(220 / Math.max(this.view.count, 1), 0.42)),
     )
     material.uniforms.uIntensity.value +=
       (targetIntensity - material.uniforms.uIntensity.value) *
@@ -860,12 +864,16 @@ export class BirdScene {
 
     material.uniforms.uTime.value = elapsed
 
-    this.geometry.instanceCount = this.sim.count
-    this.offsetAttr.needsUpdate = true
-    this.velocityAttr.needsUpdate = true
+    this.geometry.instanceCount = this.view.count
+    // Sube solo las instancias activas, no las 5000 posiciones reservadas.
+    for (const attribute of [this.offsetAttr, this.velocityAttr]) {
+      attribute.clearUpdateRanges()
+      attribute.addUpdateRange(0, this.view.count * 3)
+      attribute.needsUpdate = true
+    }
 
     // Marcador del destino.
-    const target = this.sim.target
+    const target = this.view.target
     this.marker.visible = Boolean(target)
     if (target) {
       this.marker.position.set(target.x, target.y, target.z)
@@ -876,7 +884,7 @@ export class BirdScene {
       this.markerRing.material.opacity = 0.32 + pulse * 0.28
       this.markerArc.rotation.z = elapsed * 0.55
       this.markerGlow.material.opacity =
-        0.26 + pulse * 0.12 + this.sim.pulseCharge * 0.18
+        0.26 + pulse * 0.12 + this.view.pulseCharge * 0.18
     }
 
     this._updateDefenseFx(dt)
@@ -903,7 +911,7 @@ export class BirdScene {
   }
 
   _updateSparks(dt) {
-    const target = this.sim.target
+    const target = this.view.target
     const impacts = this.sim.consumeImpacts()
     this.totalImpacts += impacts
 
