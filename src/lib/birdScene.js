@@ -97,7 +97,7 @@ export class BirdScene {
     this.scene.background = new THREE.Color('#05070f')
 
     this.camera = new THREE.PerspectiveCamera(55, 1, 0.1, 500)
-    this.camera.position.set(0, 14, 84)
+    this.camera.position.set(0, 12, 70)
 
     this.renderer = new THREE.WebGLRenderer({
       canvas,
@@ -113,8 +113,8 @@ export class BirdScene {
     this.controls.enableDamping = true
     this.controls.dampingFactor = 0.06
     this.controls.enablePan = false
-    this.controls.minDistance = 42
-    this.controls.maxDistance = 170
+    this.controls.minDistance = 36
+    this.controls.maxDistance = 160
     this.controls.minPolarAngle = Math.PI * 0.16
     this.controls.maxPolarAngle = Math.PI * 0.64
     this.controls.rotateSpeed = 0.55
@@ -764,10 +764,20 @@ export class BirdScene {
   }
 
   _fitCamera(aspect) {
-    const halfWidth = BOUNDS.x * 0.68
+    // Encuadra el volumen completo: primero calcula la distancia necesaria
+    // para el ancho y para el alto, y usa la mayor. Así el enjambre llena la
+    // pantalla en lugar de quedar reducido al centro.
+    const halfWidth = BOUNDS.x * 0.9
+    const halfHeight = BOUNDS.y * 0.9
     const vFov = THREE.MathUtils.degToRad(this.camera.fov)
-    const needed = halfWidth / (Math.tan(vFov / 2) * aspect)
-    const distance = THREE.MathUtils.clamp(needed, 85, 152)
+    const tan = Math.tan(vFov / 2)
+    const neededForWidth = halfWidth / (tan * aspect)
+    const neededForHeight = halfHeight / tan
+    const distance = THREE.MathUtils.clamp(
+      Math.max(neededForWidth, neededForHeight),
+      52,
+      152,
+    )
     const direction = this.camera.position.clone().sub(this.controls.target)
     if (direction.lengthSq() === 0) direction.set(0, 0.17, 1)
     direction.normalize().multiplyScalar(distance)
