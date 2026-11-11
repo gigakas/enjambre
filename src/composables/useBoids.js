@@ -1,12 +1,16 @@
 import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
+  BOMB_COUNT,
   DEFAULT_BOIDS,
   DEFAULT_PARAMS,
   Flock3D,
   MAX_BOIDS,
   MIN_BOIDS,
+  TARGET_MAX_ENERGY,
+  TARGET_MAX_HEALTH,
 } from '../lib/flock3d'
 import { BirdScene } from '../lib/birdScene'
+import { t } from '../i18n'
 
 export function useBoids() {
   const canvasRef = ref(null)
@@ -16,8 +20,22 @@ export function useBoids() {
   const count = ref(DEFAULT_BOIDS)
   const impacts = ref(0)
   const blocks = ref(0)
-  const stateCounts = ref([0, 0, 0, 0, 0])
+  const stateCounts = ref([0, 0, 0, 0, 0, 0])
   const command = ref({ commander: null, squads: [], log: [], stance: 'flanqueo' })
+  const targetHealth = ref(TARGET_MAX_HEALTH)
+  const targetEnergy = ref(TARGET_MAX_ENERGY)
+  const alive = ref(DEFAULT_BOIDS)
+  const total = ref(DEFAULT_BOIDS)
+  const plan = ref('dividido')
+  const battleState = ref('idle')
+  const kills = ref(0)
+  const collisions = ref(0)
+  const shots = ref(0)
+  const bombStock = ref(BOMB_COUNT)
+  const bombActive = ref(0)
+  const bombInterceptors = ref(0)
+  const bombExplosions = ref(0)
+  const bombIntercepts = ref(0)
   const error = ref('')
 
   const params = reactive({
@@ -52,6 +70,27 @@ export function useBoids() {
     sim?.setCount(value)
   })
 
+  function syncCombat() {
+    if (!sim) return
+    const info = sim.getCombatInfo()
+    targetHealth.value = info.targetHealth
+    targetEnergy.value = info.targetEnergy
+    alive.value = info.alive
+    total.value = info.total
+    plan.value = info.plan
+    battleState.value = info.battleState
+    bombStock.value = info.bombStock
+    bombActive.value = info.bombActive
+    bombInterceptors.value = info.bombInterceptors
+    if (scene) {
+      kills.value = scene.totalKills
+      collisions.value = scene.totalCollisions
+      shots.value = scene.totalShots
+      bombExplosions.value = scene.totalBombExplosions
+      bombIntercepts.value = scene.totalBombIntercepts
+    }
+  }
+
   function onPointerDown(event) {
     if (event.button !== 0) return
     scene?.notifyInteraction()
@@ -79,9 +118,16 @@ export function useBoids() {
     scene.spawnRipple(point)
     scene.totalImpacts = 0
     scene.totalBlocks = 0
+    scene.totalKills = 0
+    scene.totalCollisions = 0
+    scene.totalShots = 0
+    scene.totalBombsLaunched = 0
+    scene.totalBombExplosions = 0
+    scene.totalBombIntercepts = 0
     impacts.value = 0
     blocks.value = 0
     hasTarget.value = true
+    syncCombat()
   }
 
   function frame(now) {
@@ -107,6 +153,7 @@ export function useBoids() {
       blocks.value = scene.totalBlocks
       stateCounts.value = sim.getStateCounts()
       command.value = sim.getCommandInfo()
+      syncCombat()
       fpsAccum = 0
       fpsFrames = 0
     }
@@ -126,10 +173,17 @@ export function useBoids() {
     if (scene) {
       scene.totalImpacts = 0
       scene.totalBlocks = 0
+      scene.totalKills = 0
+      scene.totalCollisions = 0
+      scene.totalShots = 0
+      scene.totalBombsLaunched = 0
+      scene.totalBombExplosions = 0
+      scene.totalBombIntercepts = 0
     }
     impacts.value = 0
     blocks.value = 0
     hasTarget.value = false
+    syncCombat()
   }
 
   function reset() {
@@ -140,12 +194,19 @@ export function useBoids() {
     if (scene) {
       scene.totalImpacts = 0
       scene.totalBlocks = 0
+      scene.totalKills = 0
+      scene.totalCollisions = 0
+      scene.totalShots = 0
+      scene.totalBombsLaunched = 0
+      scene.totalBombExplosions = 0
+      scene.totalBombIntercepts = 0
     }
     impacts.value = 0
     blocks.value = 0
     command.value = sim.getCommandInfo()
     stateCounts.value = sim.getStateCounts()
     hasTarget.value = false
+    syncCombat()
   }
 
   onMounted(() => {
@@ -169,8 +230,7 @@ export function useBoids() {
       }
     } catch (err) {
       console.error(err)
-      error.value =
-        'Tu navegador no ha podido iniciar WebGL. Prueba con otro navegador o activa la aceleración por hardware.'
+      error.value = t('error.webgl')
       return
     }
 
@@ -206,6 +266,20 @@ export function useBoids() {
     blocks,
     stateCounts,
     command,
+    targetHealth,
+    targetEnergy,
+    alive,
+    total,
+    plan,
+    battleState,
+    kills,
+    collisions,
+    shots,
+    bombStock,
+    bombActive,
+    bombInterceptors,
+    bombExplosions,
+    bombIntercepts,
     error,
     minBoids: MIN_BOIDS,
     maxBoids: MAX_BOIDS,
