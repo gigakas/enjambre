@@ -18,7 +18,7 @@ export class SpatialGrid {
     this.cellItems = new Int32Array(maxCount)
   }
 
-  build(positions, count) {
+  build(positions, count, health = null) {
     const {
       bounds,
       cellSize,
@@ -36,6 +36,7 @@ export class SpatialGrid {
     cellCounts.fill(0)
 
     for (let i = 0; i < count; i += 1) {
+      if (health && health[i] <= 0) continue
       const i3 = i * 3
       let cx = Math.floor((positions[i3] + bounds.x) / cellSize)
       let cy = Math.floor((positions[i3 + 1] + bounds.y) / cellSize)

@@ -59,8 +59,12 @@ export class CommandChain {
     return leaders
   }
 
-  log(message) {
-    this.commandLog.unshift(message)
+  /**
+   * Registra un evento como clave + parámetros para que la interfaz lo
+   * traduzca según el idioma activo.
+   */
+  log(key, params = null) {
+    this.commandLog.unshift(params ? { key, params } : { key })
     if (this.commandLog.length > 4) this.commandLog.length = 4
   }
 
@@ -109,8 +113,8 @@ export class CommandChain {
     this.selectCommander()
     this.commandVersion += 1
     this.commandLog = []
-    const code = this.commander >= 0 ? this.getCode(this.commander) : 'sin líder'
-    this.log(`Mando inicial · ${code}`)
+    const code = this.commander >= 0 ? this.getCode(this.commander) : ''
+    this.log('log.commandInit', { code })
   }
 
   ensure() {
@@ -158,19 +162,19 @@ export class CommandChain {
       const nextLeader = this.nextSquadLeader(wasSquad, index)
       this.leaderOfSquad[wasSquad] = nextLeader
       const oldCode = this.getCode(index)
-      const nextCode =
-        nextLeader >= 0 ? this.getCode(nextLeader) : 'sin relevo'
+      const nextCode = nextLeader >= 0 ? this.getCode(nextLeader) : ''
       this.log(
-        `${oldCode} derribada · ${nextCode} asume el escuadrón ${SQUAD_LETTERS[wasSquad]}`,
+        nextCode ? 'log.leaderDown' : 'log.leaderDownNoSuccessor',
+        { code: oldCode, next: nextCode, squad: SQUAD_LETTERS[wasSquad] },
       )
     }
 
     this.selectCommander()
     if (wasCommander && this.commander !== index) {
       if (this.commander >= 0) {
-        this.log(`${this.getCode(this.commander)} toma el mando del enjambre`)
+        this.log('log.commander', { code: this.getCode(this.commander) })
       } else {
-        this.log('Sin relevo disponible · mando en espera')
+        this.log('log.noSuccessor')
       }
     }
 
@@ -191,9 +195,10 @@ export class CommandChain {
   }
 
   /** Recupera a los líderes derribados; devuelve cuántos volvieron. */
-  tick(dt) {
+  tick(dt, health = null) {
     let recovered = 0
     for (let i = 0; i < this.count; i += 1) {
+      if (health && health[i] <= 0) continue
       if (this.downTimers[i] > 0) {
         this.downTimers[i] -= dt
         if (this.downTimers[i] <= 0) {

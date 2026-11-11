@@ -72,7 +72,12 @@ test('a downed leader is replaced by the next code in its squad', () => {
   assert.ok(sim.downTimers[0] > 0)
   assert.equal(sim.states[0], STATE.EVADE)
   assert.ok(
-    sim.getCommandInfo().log.some((entry) => /A-001 derribada/.test(entry)),
+    sim
+      .getCommandInfo()
+      .log.some(
+        (entry) =>
+          entry.key === 'log.leaderDown' && entry.params.code === 'A-001',
+      ),
   )
 
   sim._downLeader(4)
@@ -116,11 +121,46 @@ test('the FSM reaches attack states and registers impacts over time', () => {
   const counts = sim.getStateCounts()
   assert.equal(
     counts.reduce((total, value) => total + value, 0),
-    sim.count,
+    sim.aliveCount,
   )
   assert.ok(counts[STATE.DIVE] > 0)
   assert.ok(sim.consumeImpacts() > 0)
-  assert.ok(sim.consumeBlocks() > 0)
+  assert.ok(sim.getCombatInfo().targetHealth < 100)
+})
+
+test('combat starts a full round and produces shots, kills and collisions', () => {
+  const sim = makeSim({ seed: 12345 })
+  sim.setTarget(0, 0, 0)
+
+  const initial = sim.getCombatInfo()
+  assert.equal(initial.battleState, 'active')
+  assert.equal(initial.targetHealth, 100)
+  assert.equal(initial.targetEnergy, 100)
+  assert.equal(initial.alive, 50)
+  assert.equal(initial.cannons.length, 2)
+  assert.equal(initial.bombStock, 5)
+
+  for (let i = 0; i < 600; i += 1) sim.update(1 / 60)
+
+  const info = sim.getCombatInfo()
+  assert.ok(info.targetHealth < 100)
+  assert.ok(info.alive < sim.count)
+  assert.ok(sim.consumeShots().length > 0)
+  assert.ok(sim.consumeKills().length > 0)
+  assert.ok(sim.consumeCollisions() > 0)
+})
+
+test('clearTarget resets combat to idle', () => {
+  const sim = makeSim()
+  sim.setTarget(0, 0, 0)
+  for (let i = 0; i < 60; i += 1) sim.update(1 / 60)
+
+  sim.clearTarget()
+  const info = sim.getCombatInfo()
+  assert.equal(info.battleState, 'idle')
+  assert.equal(info.targetHealth, 100)
+  assert.equal(info.targetEnergy, 100)
+  assert.equal(info.bombActive, 0)
 })
 
 test('the same seed produces the same simulation', () => {

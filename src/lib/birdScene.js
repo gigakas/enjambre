@@ -2,13 +2,10 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import {
   BOUNDS,
-<<<<<<< HEAD
-  clamp,
-=======
   BOMB_COUNT,
   BOMB_RADIUS,
   CANNON_MOUNTS,
->>>>>>> 51f5efab3cebde893a3e34ab2c58b7528ea74dc8
+  clamp,
   MAX_BOIDS,
   PLAY_BOUNDS,
   PULSE_RADIUS,
@@ -17,21 +14,14 @@ import {
   SQUAD_COUNT,
   TARGET_MAX_HEALTH,
 } from './flock3d'
-<<<<<<< HEAD
 import {
   SQUAD_COLORS,
   SQUAD_COLORS_CSS,
   SQUAD_HUES,
 } from './palette'
-=======
 
 /** Velocidad visual de las balas de la metralleta. */
 const BULLET_SPEED = 420
-
-const SQUAD_HUES = [0.48, 0.6, 0.73, 0.86]
-const SQUAD_COLORS = [0x63e6ff, 0x7f9cff, 0xb18cff, 0xff8fd0]
-const SQUAD_COLORS_CSS = ['#63e6ff', '#7f9cff', '#b18cff', '#ff8fd0']
->>>>>>> 51f5efab3cebde893a3e34ab2c58b7528ea74dc8
 
 const WING_VERTICES = new Float32Array([
   // Ala izquierda
@@ -784,15 +774,15 @@ export class BirdScene {
   }
 
   _refreshLeaderLabels() {
-    const view = this.view
+    const sim = this.sim
     for (let s = 0; s < SQUAD_COUNT; s += 1) {
-      const index = view.leaderOfSquad[s]
-      if (index < 0 || index >= view.count) {
+      const index = sim.leaderOfSquad[s]
+      if (index < 0 || index >= sim.count) {
         this._labelText[s] = ''
         continue
       }
-      const isCommander = index === view.commander
-      const code = this.sim.getCode(index)
+      const isCommander = index === sim.commander
+      const code = sim.getCode(index)
       const text = isCommander ? `CMD · ${code}` : code
       if (text === this._labelText[s]) continue
 
@@ -806,20 +796,20 @@ export class BirdScene {
   }
 
   _updateLeaderFx(dt, elapsed) {
-    const view = this.view
-    if (view.commandVersion !== this.lastCommandVersion) {
-      this.lastCommandVersion = view.commandVersion
+    const sim = this.sim
+    if (sim.commandVersion !== this.lastCommandVersion) {
+      this.lastCommandVersion = sim.commandVersion
       this._refreshLeaderLabels()
     }
-    if (view.strategyVersion !== this.lastStrategyVersion) {
-      this.lastStrategyVersion = view.strategyVersion
+    if (sim.strategyVersion !== this.lastStrategyVersion) {
+      this.lastStrategyVersion = sim.strategyVersion
       this.communicationFlash = 1
     }
     this.communicationFlash = Math.max(0, this.communicationFlash - dt * 1.6)
 
-    const positions = view.positions
-    const leaders = view.leaderOfSquad
-    const commander = view.commander
+    const positions = sim.positions
+    const leaders = sim.leaderOfSquad
+    const commander = sim.commander
     const distanceFactor = THREE.MathUtils.clamp(
       this.camera.position.distanceTo(this.controls.target) / 85,
       1,
@@ -831,7 +821,7 @@ export class BirdScene {
       const index = leaders[s]
       const halo = this.leaderHaloes[s]
       const label = this.leaderLabels[s]
-      if (index < 0 || index >= view.count) {
+      if (index < 0 || index >= sim.count) {
         halo.visible = false
         label.visible = false
         continue
@@ -860,7 +850,7 @@ export class BirdScene {
 
     const linkPositions = this.leaderLinks.geometry.attributes.position
     let segment = 0
-    if (commander >= 0 && commander < view.count) {
+    if (commander >= 0 && commander < sim.count) {
       const c3 = commander * 3
       const cx = positions[c3]
       const cy = positions[c3 + 1]
@@ -1209,17 +1199,11 @@ export class BirdScene {
 
   _updateDefenseFx(dt) {
     const sim = this.sim
-<<<<<<< HEAD
-    const view = this.view
-    const target = view.target
-    const active = Boolean(target) && view.defenseActive
-=======
     const target = sim.target
     const active =
       Boolean(target) &&
       sim.params.defense > 0.05 &&
       sim.battleState === 'active'
->>>>>>> 51f5efab3cebde893a3e34ab2c58b7528ea74dc8
 
     const blocks = sim.consumeBlocks()
     if (blocks > 0) {
@@ -1236,14 +1220,14 @@ export class BirdScene {
     if (active) {
       this.shieldGroup.position.set(target.x, target.y, target.z)
       this._shieldDir
-        .set(view.shield.x, view.shield.y, view.shield.z)
+        .set(sim.shield.x, sim.shield.y, sim.shield.z)
         .normalize()
       this.shieldGroup.quaternion.setFromUnitVectors(
         this._shieldAxis,
         this._shieldDir,
       )
 
-      const charge = view.pulseCharge
+      const charge = sim.pulseCharge
       this.shieldCapMaterial.opacity = 0.08 + charge * 0.08 + this.shieldFlash * 0.22
       this.shieldRimMaterial.opacity =
         0.32 + charge * 0.3 + this.shieldFlash * 0.4
@@ -1354,9 +1338,8 @@ export class BirdScene {
   }
 
   _fitCamera(aspect) {
-    // Encuadra el volumen completo: primero calcula la distancia necesaria
-    // para el ancho y para el alto, y usa la mayor. Así el enjambre llena la
-    // pantalla en lugar de quedar reducido al centro.
+    // Encuadra el volumen completo: calcula la distancia para el ancho y
+    // para el alto, y usa la mayor. Así el enjambre llena la pantalla.
     const halfWidth = BOUNDS.x * 0.9
     const halfHeight = BOUNDS.y * 0.9
     const vFov = THREE.MathUtils.degToRad(this.camera.fov)
@@ -1400,21 +1383,13 @@ export class BirdScene {
       return null
     }
 
-<<<<<<< HEAD
-    return {
-      x: clamp(this._hit.x, -BOUNDS.x * 0.9, BOUNDS.x * 0.9),
-      y: clamp(this._hit.y, -BOUNDS.y * 0.9, BOUNDS.y * 0.9),
-      z: clamp(this._hit.z, -BOUNDS.z * 0.9, BOUNDS.z * 0.9),
-=======
-    const clamp = (value, max) => Math.min(Math.max(value, -max), max)
     const maxX = PLAY_BOUNDS.x * 0.83
     const maxY = PLAY_BOUNDS.y * 0.83
     const maxZ = PLAY_BOUNDS.z * 0.83
     return {
-      x: clamp(this._hit.x, maxX),
-      y: clamp(this._hit.y, maxY),
-      z: clamp(this._hit.z, maxZ),
->>>>>>> 51f5efab3cebde893a3e34ab2c58b7528ea74dc8
+      x: clamp(this._hit.x, -maxX, maxX),
+      y: clamp(this._hit.y, -maxY, maxY),
+      z: clamp(this._hit.z, -maxZ, maxZ),
     }
   }
 
@@ -1479,20 +1454,17 @@ export class BirdScene {
 
     material.uniforms.uTime.value = elapsed
 
-<<<<<<< HEAD
     this.geometry.instanceCount = this.view.count
-    // Sube solo las instancias activas, no las 5000 posiciones reservadas.
-    for (const attribute of [this.offsetAttr, this.velocityAttr]) {
+    // Sube solo las instancias activas, no las 5000 reservadas.
+    for (const attribute of [
+      this.offsetAttr,
+      this.velocityAttr,
+      this.healthAttr,
+    ]) {
       attribute.clearUpdateRanges()
-      attribute.addUpdateRange(0, this.view.count * 3)
+      attribute.addUpdateRange(0, this.view.count * (attribute.itemSize || 1))
       attribute.needsUpdate = true
     }
-=======
-    this.geometry.instanceCount = this.sim.count
-    this.offsetAttr.needsUpdate = true
-    this.velocityAttr.needsUpdate = true
-    this.healthAttr.needsUpdate = true
->>>>>>> 51f5efab3cebde893a3e34ab2c58b7528ea74dc8
 
     // Marcador del destino.
     const target = this.view.target
@@ -1503,7 +1475,7 @@ export class BirdScene {
 
       const healthRatio = Math.max(
         0,
-        Math.min(1, this.sim.targetHealth / TARGET_MAX_HEALTH),
+        Math.min(1, this.view.targetHealth / TARGET_MAX_HEALTH),
       )
       const pulse = (Math.sin(elapsed * (2.6 + (1 - healthRatio) * 4)) + 1) / 2
       this.markerRing.scale.setScalar(
@@ -1513,14 +1485,10 @@ export class BirdScene {
         0.32 + pulse * 0.28 + this.targetHitFlash * 0.25
       this.markerArc.rotation.z = elapsed * 0.55
       this.markerGlow.material.opacity =
-<<<<<<< HEAD
-        0.26 + pulse * 0.12 + this.view.pulseCharge * 0.18
-=======
         0.26 +
         pulse * 0.12 +
-        this.sim.pulseCharge * 0.18 +
+        this.view.pulseCharge * 0.18 +
         this.targetHitFlash * 0.4
->>>>>>> 51f5efab3cebde893a3e34ab2c58b7528ea74dc8
     }
 
     this._updateCombatFx(dt, elapsed)

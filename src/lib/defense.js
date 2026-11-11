@@ -65,9 +65,16 @@ export class DefenseSystem {
   }
 
   update(dt, ctx) {
-    const { target, params, sectorCounts, sectorDirs, recomputeSectors, onPulse } =
-      ctx
-    if (!target) return
+    const {
+      target,
+      params,
+      sectorCounts,
+      sectorDirs,
+      recomputeSectors,
+      onPulse,
+      enabled = true,
+    } = ctx
+    if (!target || !enabled) return
 
     const defense = params.defense
     const defenseActive = defense > 0.05

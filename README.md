@@ -104,7 +104,7 @@ El resultado queda en `dist/`.
 npm test
 ```
 
-Cubren los códigos y la cadena de mando, los relevos, la instantánea de líderes del pulso, las transiciones de la FSM, los impactos y la rejilla espacial. La simulación acepta `seed` o `rng` en el constructor para que las pruebas sean deterministas.
+Cubren los códigos y la cadena de mando, los relevos, la instantánea de líderes del pulso, las transiciones de la FSM, los impactos, la rejilla espacial y el arranque de combate (disparos, derribos, colisiones y reinicio de ronda). La simulación acepta `seed` o `rng` en el constructor para que las pruebas sean deterministas.
 
 ## Uso
 
@@ -486,28 +486,23 @@ src/
 ├── composables/
 │   └── useBoids.js          RAF, resize, eventos de puntero y puente Vue
 └── lib/
-<<<<<<< HEAD
-    ├── constants.js         Constantes, estados y parámetros por defecto
+    ├── constants.js         Constantes, estados, combate y parámetros
     ├── palette.js           Colores compartidos por render y HUD
     ├── random.js            PRNG seedable para tests y depuración
     ├── spatialGrid.js       Rejilla espacial (counting sort)
     ├── sectors.js           Sectores y juego de congestión
     ├── commandChain.js      Códigos, líderes, comandante y relevos
     ├── defense.js           Escudo direccional y pulsos
-    ├── steering.js          Boids, FSM, integración y bordes
+    ├── combat.js            Metralletas, bombas, salud, energía y esquiva
+    ├── steering.js          Boids, FSM, integración, esquiva y bordes
     ├── flock3d.js           Orquestación de la simulación y API pública
     └── birdScene.js         Three.js: instancing, shader, escudo, pulsos,
-                             etiquetas, enlaces y cámara
-=======
-    ├── flock3d.js           Boids, rejilla, FSM, juego, defensa, combate y jerarquía
-    └── birdScene.js         Three.js: instancing, shader, escudo, pulsos, cañones,
-                             haces, etiquetas, enlaces y cámara
->>>>>>> 51f5efab3cebde893a3e34ab2c58b7528ea74dc8
+                             cañones, bombas, etiquetas, enlaces y cámara
 ```
 
 Separación de responsabilidades:
 
-- `flock3d.js` orquesta los sistemas y no conoce Vue ni Three.js. `constants.js`, `random.js`, `spatialGrid.js`, `sectors.js`, `commandChain.js`, `defense.js` y `steering.js` son lógica pura sobre arrays tipados.
+- `flock3d.js` orquesta los sistemas y no conoce Vue ni Three.js. `constants.js`, `random.js`, `spatialGrid.js`, `sectors.js`, `commandChain.js`, `defense.js`, `combat.js` y `steering.js` son lógica pura sobre arrays tipados.
 - `birdScene.js` no conoce la lógica interna del juego: consume una vista de solo lectura (`getRenderState()`), dibuja la escena y consume los eventos de impactos, bloqueos, pulsos y derribos.
 - `useBoids.js` conecta ambos con la reactividad de Vue: crea la simulación y la escena, ejecuta el bucle de animación, procesa clics y publica estadísticas.
 
@@ -526,17 +521,12 @@ App.vue ──parámetros/cantidad──► useBoids ──► Flock3D
 2. Si no está en pausa, `Flock3D.update(dt)`:
    - reconstruye la rejilla espacial (ignorando aves muertas),
    - actualiza la defensa y los pulsos,
-<<<<<<< HEAD
    - actualiza la estrategia de escuadrones,
-   - recupera líderes derribados,
-   - delega el paso de vuelo en `SteeringSystem` (vecinas, fuerzas, FSM,
-     planificación e integración).
-=======
    - actualiza los cañones, las bombas, los temporizadores de esquiva y el plan de ataque,
    - recupera líderes derribados por pulsos,
-   - recorre las aves: vecinas, fuerzas, esquiva, FSM, planificación, colisiones e integración,
+   - delega el paso de vuelo en `SteeringSystem` (vecinas, fuerzas, esquiva,
+     FSM, planificación, colisiones e integración),
    - actualiza escudo, estrategia, estado de batalla y jerarquía.
->>>>>>> 51f5efab3cebde893a3e34ab2c58b7528ea74dc8
 3. `BirdScene.update(dt, tiempo)`:
    - actualiza el tamaño y la intensidad adaptativos,
    - sube posiciones, velocidades y salud a la GPU,
@@ -578,9 +568,7 @@ Están en `src/lib/constants.js`:
 | `SHIELD_RADIUS` | 9.5 | Radio del escudo |
 | `SHIELD_ANGLE` | 0.95 rad | Semiangulo del cono del escudo |
 | `PULSE_RADIUS` | 15 | Radio del pulso defensivo |
-<<<<<<< HEAD
 | `RETREAT_CHARGE` | 0.55 | Carga de pulso que activa el repliegue |
-=======
 | `TARGET_MAX_HEALTH` | 100 | Salud del objetivo |
 | `TARGET_MAX_ENERGY` | 100 | Energía del objetivo |
 | `ATTACKER_MAX_HEALTH` | 5 | Salud de cada atacante |
@@ -606,7 +594,6 @@ Están en `src/lib/constants.js`:
 | `BOMB_MIN_RANGE` | 18 u | Distancia mínima del punto de detonación |
 | `BOMB_DETECT_RADIUS` | 32 | Radio de detección de las aves |
 | `BOMB_MAX_INTERCEPTORS` | 3 | Aves que planifican el derribo por bomba |
->>>>>>> 51f5efab3cebde893a3e34ab2c58b7528ea74dc8
 | `LEADER_DOWN_TIME` | ~6 s | Recuperación de un líder |
 | `STRATEGY_INTERVAL` | ~2.4 s | Reunión de líderes |
 

@@ -1,18 +1,21 @@
 import {
+  BOMB_INTERCEPT_RADIUS,
   BOUNDS,
+  PLAY_BOUNDS,
   PULSE_RADIUS,
   RETREAT_CHARGE,
   SHIELD_COS,
   SHIELD_RADIUS,
+  SQUAD_COUNT,
   STAGE_RADIUS,
   STATE,
 } from './constants.js'
 import { SECTOR_DIRS } from './sectors.js'
 
 const WRAP_MARGIN = 14
-const WRAP_X = BOUNDS.x + WRAP_MARGIN
-const WRAP_Y = BOUNDS.y + WRAP_MARGIN
-const WRAP_Z = BOUNDS.z + WRAP_MARGIN
+const WRAP_X = PLAY_BOUNDS.x + WRAP_MARGIN
+const WRAP_Y = PLAY_BOUNDS.y + WRAP_MARGIN
+const WRAP_Z = PLAY_BOUNDS.z + WRAP_MARGIN
 
 /**
  * Un paso de vuelo del enjambre: vecinas, boids, FSM, integración y bordes.
@@ -48,6 +51,8 @@ export class SteeringSystem {
     const positions = flock.positions
     const velocities = flock.velocities
     const states = flock.states
+    const combat = flock.combat
+    const health = combat.health
     const count = flock.count
     if (count === 0) return
 
@@ -66,11 +71,13 @@ export class SteeringSystem {
     const defenseActive = p.defense > 0.05
     const pulseCharge = flock.defense.pulseCharge
     const behavior = this.behavior
-    const edgeX = BOUNDS.x - p.edgeMargin
-    const edgeY = BOUNDS.y - p.edgeMargin
-    const edgeZ = BOUNDS.z - p.edgeMargin
+    const limits = target ? PLAY_BOUNDS : BOUNDS
+    const edgeX = limits.x - p.edgeMargin
+    const edgeY = limits.y - p.edgeMargin
+    const edgeZ = limits.z - p.edgeMargin
 
     for (let i = 0; i < count; i += 1) {
+      if (health[i] <= 0) continue
       const i3 = i * 3
       const px = positions[i3]
       const py = positions[i3 + 1]
@@ -110,9 +117,11 @@ export class SteeringSystem {
           ay *= k
           az *= k
         }
-        fx += ax * p.separation
-        fy += ay * p.separation
-        fz += az * p.separation
+        // Las aves con memoria de daño se separan más.
+        const separationWeight = p.separation * (1 + combat.caution[i] * 0.5)
+        fx += ax * separationWeight
+        fy += ay * separationWeight
+        fz += az * separationWeight
       }
 
       // --- Alineación ---
@@ -157,7 +166,13 @@ export class SteeringSystem {
             az *= k
           }
           const cohesionWeight = target
-            ? p.cohesion * (state === STATE.DIVE ? 0.2 : 0.5)
+            ? p.cohesion *
+              (state === STATE.DIVE
+                ? 0.2
+                : state === STATE.INTERCEPT
+                  ? 0.15
+                  : 0.5) *
+              (1 - combat.caution[i] * 0.12)
             : p.cohesion
           fx += ax * cohesionWeight
           fy += ay * cohesionWeight
@@ -182,6 +197,16 @@ export class SteeringSystem {
         fx += behavior.fx
         fy += behavior.fy
         fz += behavior.fz
+      }
+
+      // --- Esquiva: si detecta el disparo, se desplaza lateralmente ---
+      if (combat.threatTimers[i] > 0) {
+        const urgency =
+          (combat.threatTimers[i] > 0.35 ? 1.35 : 0.85) *
+          (1 + combat.caution[i] * 0.4)
+        fx += combat.dodgeX[i] * maxForce * urgency
+        fy += combat.dodgeY[i] * maxForce * urgency
+        fz += combat.dodgeZ[i] * maxForce * urgency
       }
 
       // --- Bordes: giro suave hacia el interior ---
@@ -316,6 +341,8 @@ export class SteeringSystem {
     const invDist = 1 / Math.max(dist, 0.0001)
     const maxSpeed = p.maxSpeed
     const states = flock.states
+    const combat = flock.combat
+    const battleActive = combat.battleState === 'active'
 
     let desiredX = 0
     let desiredY = 0
@@ -364,7 +391,18 @@ export class SteeringSystem {
         }
       } else {
         flock.stateTimers[i] -= step
-        if (flock.stateTimers[i] <= 0) states[i] = STATE.DIVE
+        if (flock.stateTimers[i] <= 0) {
+          // Plan ordenado: solo la oleada activa (dos escuadrones) se lanza.
+          const squad = i % SQUAD_COUNT
+          const inWave =
+            squad === combat.orderedSquad ||
+            squad === (combat.orderedSquad + 1) % SQUAD_COUNT
+          if (combat.attackPlan === 'ordenado' && !inWave) {
+            flock.stateTimers[i] = 0.35
+          } else {
+            states[i] = STATE.DIVE
+          }
+        }
       }
     } else if (state === STATE.DIVE) {
       const ux = dx * invDist
@@ -376,35 +414,42 @@ export class SteeringSystem {
       behaviorWeight = p.seek * 1.35
 
       if (dist < p.strikeRadius) {
-        // Impacto confirmado.
-        states[i] = STATE.RETREAT
-        flock.stateTimers[i] = 0.45 + flock.random() * 0.5
-        flock.pendingImpacts += 1
-        desiredX = -ux * maxSpeed
-        desiredY = -uy * maxSpeed
-        desiredZ = -uz * maxSpeed
-        behaviorWeight = p.seek * 1.15
-      } else if (defenseActive && dist < SHIELD_RADIUS) {
-        // El escudo cubre este ángulo: el ataque es rechazado.
-        const outX = -ux
-        const outY = -uy
-        const outZ = -uz
-        const shieldDot = outX * shield.x + outY * shield.y + outZ * shield.z
+        // El escudo puede rechazar el ataque antes del contacto.
+        let shieldDot = -1
+        if (defenseActive && battleActive && dist < SHIELD_RADIUS) {
+          shieldDot = -ux * shield.x + -uy * shield.y + -uz * shield.z
+        }
+
         if (shieldDot > SHIELD_COS) {
           states[i] = STATE.EVADE
           flock.stateTimers[i] = 0.5 + flock.random() * 0.45
           flock.pendingBlocks += 1
           const kick = 5 + p.defense * 3
-          flock.velocities[i3] += outX * kick
-          flock.velocities[i3 + 1] += outY * kick
-          flock.velocities[i3 + 2] += outZ * kick
-          desiredX = outX * maxSpeed
-          desiredY = outY * maxSpeed
-          desiredZ = outZ * maxSpeed
+          flock.velocities[i3] -= ux * kick
+          flock.velocities[i3 + 1] -= uy * kick
+          flock.velocities[i3 + 2] -= uz * kick
+          desiredX = -ux * maxSpeed
+          desiredY = -uy * maxSpeed
+          desiredZ = -uz * maxSpeed
           behaviorWeight = p.seek * 1.25
+        } else if (battleActive && combat.collisionTimers[i] <= 0) {
+          // Colisión confirmada: solo así el objetivo pierde salud.
+          combat.applyCollision(i)
+          flock.pendingImpacts += 1
+          states[i] = STATE.RETREAT
+          flock.stateTimers[i] = 2.2 + flock.random() * 1.4
+          const kick = 5 + p.defense * 2
+          flock.velocities[i3] -= ux * kick
+          flock.velocities[i3 + 1] -= uy * kick
+          flock.velocities[i3 + 2] -= uz * kick
+          desiredX = -ux * maxSpeed
+          desiredY = -uy * maxSpeed
+          desiredZ = -uz * maxSpeed
+          behaviorWeight = p.seek * 1.2
         }
       } else if (
         defenseActive &&
+        battleActive &&
         pulseCharge > RETREAT_CHARGE &&
         dist < PULSE_RADIUS * 0.95
       ) {
@@ -415,6 +460,44 @@ export class SteeringSystem {
         desiredY = -uy * maxSpeed
         desiredZ = -uz * maxSpeed
         behaviorWeight = p.seek * 1.2
+      }
+    } else if (state === STATE.INTERCEPT) {
+      // Derribo de una bomba: se vuela hasta su trayectoria y se choca.
+      const bombId = combat.interceptTarget[i]
+      const bomb =
+        bombId >= 0
+          ? combat.bombs.find((item) => item.id === bombId)
+          : null
+
+      if (!bomb) {
+        states[i] = STATE.DISTRIBUTE
+        flock.stateTimers[i] = 0
+        flock.planTimers[i] = 0.1 + flock.random() * 0.4
+      } else {
+        const bdx = bomb.x - px
+        const bdy = bomb.y - py
+        const bdz = bomb.z - pz
+        const bombDist = Math.sqrt(bdx * bdx + bdy * bdy + bdz * bdz)
+
+        const lead = Math.min(0.6, bombDist / 40)
+        const tdx = bomb.x + bomb.vx * lead - px
+        const tdy = bomb.y + bomb.vy * lead - py
+        const tdz = bomb.z + bomb.vz * lead - pz
+        const tdist = Math.sqrt(tdx * tdx + tdy * tdy + tdz * tdz) || 1
+
+        desiredX = (tdx / tdist) * maxSpeed
+        desiredY = (tdy / tdist) * maxSpeed
+        desiredZ = (tdz / tdist) * maxSpeed
+        behaviorWeight = p.seek * 1.6
+
+        if (bombDist < BOMB_INTERCEPT_RADIUS * 1.6) {
+          states[i] = STATE.EVADE
+          flock.stateTimers[i] = 0.45 + flock.random() * 0.35
+          const kick = 4 + p.defense
+          flock.velocities[i3] += bomb.vx * 0.16 * kick
+          flock.velocities[i3 + 1] += bomb.vy * 0.16 * kick
+          flock.velocities[i3 + 2] += bomb.vz * 0.16 * kick
+        }
       }
     } else {
       // RETREAT / EVADE: salir del radio y volver a la distribución.

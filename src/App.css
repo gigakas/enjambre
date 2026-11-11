@@ -172,11 +172,203 @@
   color: #ffd08a;
 }
 
+.status__lang {
+  pointer-events: auto;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(140, 180, 255, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  color: #a9c0e0;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.status__lang:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(140, 200, 255, 0.4);
+  color: #ffffff;
+}
+
 .status__attack {
   font-size: 9px;
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: #ffa078;
+}
+
+/* ---------- Combate ---------- */
+
+.battle {
+  position: fixed;
+  top: 40px;
+  left: 50%;
+  z-index: 2;
+  width: 300px;
+  padding: 12px 14px 11px;
+  transform: translateX(-50%);
+  border-radius: 14px;
+  border: 1px solid rgba(255, 150, 110, 0.2);
+  background: rgba(16, 11, 14, 0.58);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  pointer-events: none;
+  transition:
+    border-color 0.4s ease,
+    background 0.4s ease;
+}
+
+.battle--over {
+  border-color: rgba(140, 180, 255, 0.28);
+  background: rgba(9, 14, 24, 0.68);
+}
+
+.battle__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.battle__label {
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #ffb49a;
+}
+
+.battle__plan {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: #9fc4e8;
+}
+
+.battle__bar {
+  position: relative;
+  height: 7px;
+  margin-bottom: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.battle__bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  transition: width 0.35s ease;
+}
+
+.battle__bar--health i {
+  background: linear-gradient(90deg, #ff6b5c, #ffb07a);
+  box-shadow: 0 0 10px rgba(255, 120, 90, 0.55);
+}
+
+.battle__bar--energy i {
+  background: linear-gradient(90deg, #63e6ff, #8fb4ff);
+  box-shadow: 0 0 10px rgba(99, 230, 255, 0.45);
+}
+
+.battle__bar span {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 7px;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.battle__foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 2px;
+  font-size: 9px;
+  color: #b9c8de;
+  font-variant-numeric: tabular-nums;
+}
+
+.battle__foot b {
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.battle__bombs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px solid rgba(255, 150, 110, 0.14);
+}
+
+.battle__bombs-label {
+  font-size: 8.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #ffb49a;
+}
+
+.battle__bombs-pips {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.battle__bombs-pips i {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: #ffb457;
+  box-shadow: 0 0 7px rgba(255, 180, 87, 0.85);
+}
+
+.battle__bombs-pips i.battle__pip--spent {
+  background: rgba(255, 255, 255, 0.16);
+  box-shadow: none;
+}
+
+.battle__bombs-live {
+  font-size: 8.5px;
+  color: #ffd9a8;
+}
+
+.battle__bombs-live--muted {
+  color: #7f93b1;
+}
+
+.battle__outcome {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 9px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid rgba(140, 180, 255, 0.16);
+}
+
+.battle__outcome b {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.battle__outcome span {
+  font-size: 9.5px;
+  color: #a8b9d2;
+}
+
+.battle__outcome--win b {
+  color: #8ef0c0;
+}
+
+.battle__outcome--lose b {
+  color: #ff9a8a;
 }
 
 /* ---------- Pista inferior ---------- */
@@ -456,6 +648,107 @@
   color: #8097b8;
 }
 
+/* ---------- Combate (panel) ---------- */
+
+.combat {
+  margin-top: 16px;
+  padding: 13px 14px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 150, 110, 0.16);
+  background: rgba(255, 120, 90, 0.045);
+}
+
+.combat__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.combat__head .section-kicker {
+  margin: 0;
+}
+
+.combat__plan {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: #ffb49a;
+}
+
+.combat__meter {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 5px;
+  font-size: 9.5px;
+  color: #a7b8d3;
+}
+
+.combat__value {
+  color: #e7f3ff;
+  font-variant-numeric: tabular-nums;
+}
+
+.combat__bar {
+  height: 6px;
+  margin-bottom: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.combat__bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  transition: width 0.35s ease;
+}
+
+.combat__bar--health {
+  background: linear-gradient(90deg, #ff6b5c, #ffb07a);
+}
+
+.combat__bar--energy {
+  background: linear-gradient(90deg, #63e6ff, #8fb4ff);
+}
+
+.combat__bar--swarm {
+  background: linear-gradient(90deg, #8cecff, #b49bff);
+}
+
+.combat__bar--bomb {
+  background: linear-gradient(90deg, #ffb457, #ff6b4a);
+}
+
+.combat__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 2px 0 0;
+  font-size: 9.5px;
+  color: #a7b8d3;
+}
+
+.combat__rows b {
+  font-weight: 600;
+  color: #e7f3ff;
+  font-variant-numeric: tabular-nums;
+}
+
+.combat__rows em {
+  font-style: normal;
+  color: #7f93b1;
+}
+
+.combat__hint {
+  margin: 8px 0 0;
+  font-size: 9.5px;
+  line-height: 1.55;
+  color: #8fa3c2;
+}
+
 /* ---------- FSM ---------- */
 
 .fsm {
@@ -697,6 +990,16 @@
   box-shadow: 0 0 7px rgba(110, 215, 255, 0.9);
 }
 
+.panel__dot--kill {
+  background: #ffffff;
+  box-shadow: 0 0 7px rgba(210, 240, 255, 0.9);
+}
+
+.panel__dot--shot {
+  background: #b49bff;
+  box-shadow: 0 0 7px rgba(180, 155, 255, 0.9);
+}
+
 /* ---------- Lanzador del panel ---------- */
 
 .panel-launcher {
@@ -797,6 +1100,15 @@
     right: 20px;
     padding: 7px 13px;
     font-size: 10.5px;
+  }
+
+  .battle {
+    top: auto;
+    right: 16px;
+    bottom: 128px;
+    left: 16px;
+    width: auto;
+    transform: none;
   }
 
   .hint {

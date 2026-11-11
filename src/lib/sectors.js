@@ -36,10 +36,11 @@ export class SectorGame {
     this.sectorCounts = new Int32Array(SECTOR_COUNT)
   }
 
-  recompute(count, states, sectors) {
+  recompute(count, states, sectors, health = null) {
     const counts = this.sectorCounts
     counts.fill(0)
     for (let i = 0; i < count; i += 1) {
+      if (health && health[i] <= 0) continue
       const state = states[i]
       if (state !== STATE.RETREAT && state !== STATE.EVADE) {
         counts[sectors[i]] += 1
@@ -62,6 +63,8 @@ export class SectorGame {
       squadSectors,
       sectors,
       random,
+      cannons = [],
+      caution = 0,
     } = ctx
     if (!target) return
 
@@ -105,9 +108,23 @@ export class SectorGame {
       const crowd = this.sectorCounts[s] / average
       const travel = 1 - (dir.x * dirX + dir.y * dirY + dir.z * dirZ)
 
+      // Riesgo de metralleta: los sectores alineados con el haz de un
+      // cañón reciben fuego de rebote cuando el blanco cae.
+      let cannonRisk = 0
+      for (const cannon of cannons) {
+        if (cannon.lockIndex < 0) continue
+        const dot =
+          dir.x * cannon.dirX + dir.y * cannon.dirY + dir.z * cannon.dirZ
+        if (dot > 0.7) {
+          const r = (dot - 0.7) / 0.3
+          if (r * r > cannonRisk) cannonRisk = r * r
+        }
+      }
+
       let score =
         -distribution * crowd -
         defense * 3.2 * risk -
+        cannonRisk * 2.6 * (1 + caution * 0.6) -
         0.22 * travel
       // Orden del líder: empuja al escuadrón hacia su flanco asignado
       // sin imponerlo, para que el juego de congestión siga repartiendo.
@@ -138,7 +155,15 @@ export class SectorGame {
    * el escudo y repartiendo la presión. Esa orden sesga el juego de cada ave.
    */
   planStrategy(ctx) {
-    const { count, shield, params, commander, squadSectors, random } = ctx
+    const {
+      count,
+      shield,
+      params,
+      commander,
+      squadSectors,
+      random,
+      cannons = [],
+    } = ctx
     const used = new Array(SECTOR_COUNT).fill(false)
     const order = []
     const commanderSquad = commander >= 0 ? commander % SQUAD_COUNT : 0
@@ -164,8 +189,22 @@ export class SectorGame {
           risk *= risk
         }
         const crowd = this.sectorCounts[s] / average
+
+        // Los líderes también evitan alinearse con la línea de fuego.
+        let cannonRisk = 0
+        for (const cannon of cannons) {
+          if (cannon.lockIndex < 0) continue
+          const dot =
+            dir.x * cannon.dirX + dir.y * cannon.dirY + dir.z * cannon.dirZ
+          if (dot > 0.7) {
+            const r = (dot - 0.7) / 0.3
+            if (r * r > cannonRisk) cannonRisk = r * r
+          }
+        }
+
         const score =
           -risk * 4.5 -
+          cannonRisk * 3.2 -
           crowd * 0.35 * (1 + params.distribution) +
           random() * 0.4
         if (score > bestScore) {
